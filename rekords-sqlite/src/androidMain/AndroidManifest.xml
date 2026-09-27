@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+
+    <application>
+        <!-- Hands the application context over to the SQLite engine as the application starts. -->
+        <provider
+            android:name="io.github.denisshakinov.rekords.sqlite.RekordsContextProvider"
+            android:authorities="${applicationId}.rekords-sqlite"
+            android:exported="false" />
+    </application>
+</manifest>
