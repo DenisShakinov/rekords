@@ -76,8 +76,31 @@ fun RekordListKType.elementRekordType(): String = elementDescriptor.rekordType()
 @InternalRekordsApi
 fun RekordListKType.elementAllFields(): List<FieldWithType> = elementDescriptor.allFields()
 
+/**
+ * The type the field at [index] is stored as: the one it is declared with, or an [EncryptedKType]
+ * for a field the declaration has encrypted.
+ *
+ * @throws IllegalArgumentException when the field is of a type that cannot be stored, or
+ * encrypted in a way it cannot be.
+ */
 @InternalRekordsApi
 fun SerialDescriptor.getFieldType(index: Int): KType {
+    val plainType: KType = getPlainFieldType(index)
+    val field: Field = getElementAnnotations(index).filterIsInstance<Field>().firstOrNull()
+        ?: return plainType
+    if (field.encryption == Encryption.None) return plainType
+    require(plainType !is RekordKType && plainType !is RekordListKType) {
+        "${field.name} of $serialName holds a rekord, which cannot be encrypted as a whole: " +
+            "encrypt the fields of the rekord it holds instead."
+    }
+    require(field.encryption == Encryption.Deterministic || (!field.id && !field.searchable)) {
+        "${field.name} of $serialName is encrypted Randomized, which no rekord can be selected " +
+            "by, so it can be neither an id nor searchable. Encrypt it Deterministic instead."
+    }
+    return EncryptedKType(plainType, field.encryption)
+}
+
+private fun SerialDescriptor.getPlainFieldType(index: Int): KType {
     val elementDescriptor: SerialDescriptor = getElementDescriptor(index)
     val serialName: String = elementDescriptor.serialName
     val isNullable: Boolean = elementDescriptor.isNullable
@@ -132,6 +155,28 @@ class RekordListKType(
             )
         )
     override val annotations: List<Annotation> = emptyList()
+}
+
+/**
+ * The type an encrypted field is stored as: a [String], the ciphertext, nullable as the field is.
+ * That is all a storage sees of it, so it keeps the field in a column - or whatever stands for one
+ * - of text.
+ *
+ * @property plainType the type the field holds before it is encrypted, the value of which is what
+ * reading the field gives back.
+ * @property encryption how the field is encrypted, never [Encryption.None].
+ */
+@InternalRekordsApi
+class EncryptedKType(
+    val plainType: KType,
+    val encryption: Encryption,
+) : KType, KAnnotatedElement {
+    override val classifier: KClassifier get() = String::class
+    override val arguments: List<KTypeProjection> get() = emptyList()
+    override val isMarkedNullable: Boolean get() = plainType.isMarkedNullable
+    override val annotations: List<Annotation> = emptyList()
+
+    override fun toString(): String = "String (${encryption.name} encrypted $plainType)"
 }
 
 /**

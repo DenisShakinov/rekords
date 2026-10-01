@@ -10,11 +10,22 @@ import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlin.concurrent.Volatile
 
+/**
+ * Keeps the rekords [schema] declares with [editor].
+ *
+ * @param cipher encrypts the fields [schema] declares encrypted - see [Encryption] - before
+ * [editor] is handed them, and decrypts them as they are read back. A store whose schema encrypts
+ * no field needs none; one whose schema does fails every operation without it.
+ */
 class RekordsStore(
     private val schema: RekordsSchema,
-    private val editor: RekordsEditor,
+    editor: RekordsEditor,
     private val dispatcher: CoroutineDispatcher = Dispatchers.Default,
+    private val cipher: RekordsCipher? = null,
 ) : AutoCloseable {
+
+    private val editor: RekordsEditor =
+        if (cipher != null) EncryptingRekordsEditor(editor, cipher) else editor
 
     init {
         editor.schemaEditor.schema = schema
@@ -30,6 +41,13 @@ class RekordsStore(
         if (initialized) return
         initMutex.withLock {
             if (!initialized) {
+                if (cipher == null) {
+                    val encryptedFields = schema.encryptedFields()
+                    require(encryptedFields.isEmpty()) {
+                        "The schema encrypts $encryptedFields, which takes a store given a " +
+                            "cipher: RekordsStore(schema, cipher = ...)"
+                    }
+                }
                 // A migration that fails leaves the storage as it found it, version and all, and
                 // is tried again by the next operation.
                 runOnEditor(editor) { transaction(Migration) }
@@ -148,16 +166,22 @@ class RekordsStore(
 fun RekordsStore(
     schema: RekordsSchema,
     dispatcher: CoroutineDispatcher = Dispatchers.Default,
+    cipher: RekordsCipher? = null,
     block: RekordsEngineConfig.() -> Unit = {},
-): RekordsStore = RekordsStore(schema, selectEngine(RekordsEngines.all()), dispatcher, block)
+): RekordsStore =
+    RekordsStore(schema, selectEngine(RekordsEngines.all()), dispatcher, cipher, block)
 
-/** A store keeping its rekords with [engine], configured by [block]. */
+/**
+ * A store keeping its rekords with [engine], configured by [block], encrypting what [cipher] is
+ * given to - see the [RekordsStore] class.
+ */
 fun <C : RekordsEngineConfig> RekordsStore(
     schema: RekordsSchema,
     engine: RekordsEngine<C>,
     dispatcher: CoroutineDispatcher = Dispatchers.Default,
+    cipher: RekordsCipher? = null,
     block: C.() -> Unit = {},
-): RekordsStore = RekordsStore(schema, engine.create(block), dispatcher)
+): RekordsStore = RekordsStore(schema, engine.create(block), dispatcher, cipher)
 
 /**
  * The editor a transaction's action is handed. A transaction started on it runs within the one

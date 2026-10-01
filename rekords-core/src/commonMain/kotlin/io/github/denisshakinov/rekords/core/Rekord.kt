@@ -13,13 +13,49 @@ import kotlin.reflect.KType
 @Target(AnnotationTarget.CLASS)
 annotation class Rekord(val type: String)
 
+/**
+ * @property encryption how the field is encrypted in the storage, which takes a store given a
+ * [RekordsCipher]. See [Encryption] for what each way leaves a field to be filtered by.
+ */
 @SerialInfo
 @Target(AnnotationTarget.PROPERTY)
 annotation class Field(
     val name: String,
     val id: Boolean = false,
     val searchable: Boolean = false,
+    val encryption: Encryption = Encryption.None,
 )
+
+/**
+ * How a [Field] is kept in the storage. An encrypted one is stored as text - the ciphertext - so
+ * the storage is never handed the value itself, nor told its type.
+ *
+ * Only a field holding a value is encrypted, not one holding a rekord or a list of them: the
+ * fields of the rekords it holds are encrypted each as their own declaration tells.
+ */
+enum class Encryption {
+
+    /** Stored as it is. */
+    None,
+
+    /**
+     * Encrypted anew each time, so two rekords holding the same value hold different ciphertexts
+     * and the storage cannot tell they are the same. A rekord is selected by nothing but whether
+     * the field is null, so the field can be neither an id nor searchable.
+     */
+    Randomized,
+
+    /**
+     * The same value encrypted to the same ciphertext every time, so a rekord is selected by
+     * whether the field equals a value - [Filter.Equals], [Filter.InList] - and the field can be
+     * an id or searchable. What a range, [Filter.Contains] or an order asks of it stays out of
+     * reach.
+     *
+     * It is what lets the storage tell which rekords hold the same value, and how many do: a field
+     * of a few values - a flag, a state - is better encrypted [Randomized].
+     */
+    Deterministic,
+}
 
 typealias FieldWithType = Pair<Field, KType>
 

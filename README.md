@@ -23,6 +23,7 @@ SQLite, the browser's IndexedDB or memory — is decided by the engine each targ
 | `rekords-sqlite`    | Engine keeping rekords in SQLite, through `androidx.sqlite`     | Android, JVM, iOS, macOS, tvOS, watchOS, Linux (no Intel targets on Apple platforms)                 |
 | `rekords-indexeddb` | Engine keeping rekords in the browser's IndexedDB               | JS, Wasm JS                                                                                             |
 | `rekords-memory`    | Engine keeping rekords in memory, for tests                     | Same as `rekords-core`                                                                                  |
+| `rekords-crypto`    | AES cipher encrypting the fields of rekords on every engine     | Android, JVM, JS, Wasm JS, iOS, macOS, tvOS, watchOS, Linux, Windows (MinGW) (no Intel targets on Apple platforms but iOS) |
 | `rekords-sql`       | The SQL editor the SQL engines are built on                     | Same as `rekords-core`                                                                                  |
 
 ## Setup
@@ -180,6 +181,54 @@ store.transaction {
     putRekord(newNote)
 }
 ```
+
+### Encryption
+
+A field is encrypted by its declaration, and the store is given the cipher to encrypt it with. The
+engine is handed nothing but ciphertext, kept as text, whichever engine it is:
+
+```kotlin
+@Rekord(type = "account")
+class AccountRekord(
+    @Field(name = ID, id = true)
+    val id: Long,
+    @Field(name = EMAIL, searchable = true, encryption = Encryption.Deterministic)
+    val email: String,
+    @Field(name = BALANCE, encryption = Encryption.Randomized)
+    val balance: Double,
+    @Field(name = NOTE, encryption = Encryption.Randomized)
+    val note: String?,
+)
+
+val store = RekordsStore(AccountsSchema(), cipher = AesRekordsCipher(key)) {
+    name = "accounts.db"
+}
+
+val account = store
+    .getRekord<AccountRekord>(Filter.Equals(AccountRekord.EMAIL, "alice@example.com"))
+    .getOrThrow()
+```
+
+- `Encryption.Deterministic` encrypts the same value to the same ciphertext, so rekords are
+  selected by whether the field equals a value — `Filter.Equals`, `Filter.InList`, `Filter.Not` of
+  them — and the field can be an id or searchable. The storage can tell which rekords hold the same
+  value, so a field of a few values, such as a flag, is better encrypted randomized.
+- `Encryption.Randomized` encrypts the value anew each time. Rekords are selected by nothing but
+  whether the field is null, so it can be neither an id nor searchable.
+- An encrypted field cannot be compared by a range, `Filter.Contains` or an order: the operation
+  fails with an `IllegalArgumentException`. A field holding a rekord is not encrypted itself — its
+  rekord's fields are, each as declared.
+- Encrypting a field already stored changes how it is kept: a migration removes and adds it again,
+  rather than the declaration alone. A store whose schema encrypts a field fails without a cipher.
+
+`AesRekordsCipher` from `rekords-crypto` encrypts randomized fields with AES-256-GCM and
+deterministic ones with SIV — AES-256-CTR from an HMAC-SHA256 synthetic IV — under keys it derives
+from one 32-byte key. Keeping the key is the application's business, in the Android Keystore or the
+iOS Keychain; `AesRekordsCipher.generateKey()` makes a new one. The primitives are the platform's
+own through [cryptography-kotlin](https://github.com/whyoleg/cryptography-kotlin), and
+[@noble/ciphers](https://github.com/paulmillr/noble-ciphers) in the browser: a cipher is run inside
+the editor's transactions, so it is synchronous, which WebCrypto is not. Any other `RekordsCipher`
+can be given to a store in its place.
 
 ### Engines
 

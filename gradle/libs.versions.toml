@@ -10,6 +10,9 @@ kotlinx-coroutines = "1.11.0"
 kotlinx-datetime = "0.8.0"
 
 indexeddb = "0.12.0"
+cryptography = "0.6.0"
+noble-ciphers = "2.4.0"
+noble-hashes = "2.4.0"
 
 kotlin = "2.4.20"
 maven-publish = "0.37.0"
@@ -32,6 +35,7 @@ kotlinx-datetime = { module = "org.jetbrains.kotlinx:kotlinx-datetime", version.
 
 # Other
 indexeddb-core = { module = "com.juul.indexeddb:core", version.ref = "indexeddb" }
+cryptography-provider-optimal = { module = "dev.whyoleg.cryptography:cryptography-provider-optimal", version.ref = "cryptography" }
 
 # Build logic dependencies
 android-gradlePlugin = { module = "com.android.tools.build:gradle", version.ref = "android-gradle-plugin" }

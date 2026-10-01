@@ -31,6 +31,7 @@ dependencyResolutionManagement {
 
 include(
     ":rekords-core",
+    ":rekords-crypto",
     ":rekords-indexeddb",
     ":rekords-memory",
     ":rekords-sql",

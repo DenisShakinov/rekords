@@ -82,7 +82,7 @@ internal class SchemaMigrationEditor(
         rekordType: String,
         field: FieldWithType,
         defaultValue: PrimitiveRekordValue?,
-    ) = editor.schemaEditor.addField(rekordType, field, defaultValue)
+    ) = editor.schemaEditor.addField(rekordType, field, editor.storedDefaultValue(field, defaultValue))
 
     override suspend fun removeField(rekordType: String, fieldName: String) =
         editor.schemaEditor.removeField(rekordType, fieldName)
