@@ -50,6 +50,7 @@ abstract class RekordsEncryptionTest(
             created = LocalDate(2024, 1, 15),
             vault = TestSecretVaultRekord(id = 1, code = "1111"),
             tags = listOf(work, home),
+            pinnedTag = home,
         ),
         TestSecretRekord(
             id = 2,
@@ -63,6 +64,7 @@ abstract class RekordsEncryptionTest(
             created = LocalDate(2023, 6, 1),
             vault = TestSecretVaultRekord(id = 2, code = "2222"),
             tags = listOf(home),
+            pinnedTag = null,
         ),
         TestSecretRekord(
             id = 3,
@@ -76,6 +78,7 @@ abstract class RekordsEncryptionTest(
             created = LocalDate(1999, 12, 31),
             vault = TestSecretVaultRekord(id = 1, code = "1111"),
             tags = emptyList(),
+            pinnedTag = work,
         ),
     )
 
@@ -163,6 +166,8 @@ abstract class RekordsEncryptionTest(
         assertEquals(listOf(1L), ids(withWork))
         val withHome = Filter.Nested(TestSecretRekord.TAGS, Filter.Equals(TestSecretTagRekord.ID, "home"))
         assertEquals(listOf(1L, 2L), ids(withHome))
+        val pinnedWork = Filter.Nested(TestSecretRekord.PINNED_TAG, Filter.Equals(TestSecretTagRekord.ID, "work"))
+        assertEquals(listOf(3L), ids(pinnedWork))
     }
 
     open fun check_randomized_fields_are_selected_by_null() = test {

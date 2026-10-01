@@ -170,6 +170,13 @@ Filters are combined with `+` (and) and `or`, or with `Filter.And`, `Filter.Or` 
 Filter.Nested(NoteRekord.TAGS, Filter.Equals(TagRekord.NAME, "work"))
 ```
 
+A rekord is selected once however many of its nested rekords match, and is read back whole, its
+lists with every item they hold. Nested filters look as deep as rekords are nested:
+
+```kotlin
+Filter.Nested(NoteRekord.FOLDER, Filter.Nested(FolderRekord.OWNER, Filter.Equals(UserRekord.ID, 42L)))
+```
+
 ### Transactions
 
 Operations run in `transaction` are applied together once it completes; if it throws, none of them

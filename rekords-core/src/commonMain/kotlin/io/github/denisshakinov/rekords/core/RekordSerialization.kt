@@ -233,8 +233,13 @@ internal class RekordValuesEncoder(
         }
     }
 
+    /**
+     * A field that holds nothing is written as null, a rekord or a list of them included - one
+     * left out of the values would be taken for one not written, and keep what it held before.
+     */
     override fun encodeNull() {
-        // null already set in encodeElement
+        values[elementName] = null
+        isCompositeField = false
     }
 
     override fun encodeValue(value: Any) {

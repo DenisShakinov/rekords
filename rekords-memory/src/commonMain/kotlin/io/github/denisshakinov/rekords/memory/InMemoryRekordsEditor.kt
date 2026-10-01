@@ -17,6 +17,7 @@ import io.github.denisshakinov.rekords.core.field
 import io.github.denisshakinov.rekords.core.matches
 import io.github.denisshakinov.rekords.core.pinnedValues
 import io.github.denisshakinov.rekords.core.rekordSchema
+import io.github.denisshakinov.rekords.core.runOnEditor
 import kotlin.reflect.KClass
 
 /**
@@ -74,10 +75,14 @@ class InMemoryRekordsEditor : RekordsEditor {
     /** Nothing is held open, and the rekords stored outlive the call the way a file would. */
     override fun close() = Unit
 
+    /**
+     * Runs [action] through [runOnEditor] rather than calling it: the store hands over classes
+     * implementing the function type, which Kotlin/JS cannot call as it calls a lambda.
+     */
     override suspend fun <T> transaction(action: suspend RekordsEditor.() -> T): T {
         journal.open()
         try {
-            return action()
+            return runOnEditor(this, action)
         } catch (e: Throwable) {
             journal.rollBack()
             throw e

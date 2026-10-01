@@ -2,8 +2,6 @@
 
 package io.github.denisshakinov.rekords.sql
 
-import io.github.denisshakinov.rekords.core.FieldFilter
-import io.github.denisshakinov.rekords.core.FieldValueFilter
 import io.github.denisshakinov.rekords.core.Filter
 import io.github.denisshakinov.rekords.core.InternalRekordsApi
 import io.github.denisshakinov.rekords.core.Order
@@ -16,7 +14,6 @@ import io.github.denisshakinov.rekords.core.RekordValues
 import io.github.denisshakinov.rekords.core.RekordsEditor
 import io.github.denisshakinov.rekords.core.RekordsSchemaEditor
 import io.github.denisshakinov.rekords.core.elementRekordType
-import io.github.denisshakinov.rekords.core.field
 import io.github.denisshakinov.rekords.core.rekordSchema
 import io.github.denisshakinov.rekords.core.rekordType
 import io.github.denisshakinov.rekords.core.runOnEditor
@@ -58,32 +55,32 @@ class SQLRekordsEditor(
         upsertWithComposites(rekordType, values, filter)
 
     private suspend fun upsertWithComposites(rekordType: String, values: RekordValues, filter: Filter?) {
+        val schema = rekordSchema(rekordType)
         val primitiveValues = buildMap {
             for ((fieldName, value) in values) {
-                when (value) {
-                    null, is RekordValue.Primitive -> put(fieldName, value?.value)
-                    is RekordValue.Composite ->
-                        rekordSchema(value.rekordType).values
-                            .filter { it.field.id }
-                            .forEach { (childField, _) ->
-                                put(
-                                    "${fieldName}_${childField.name}",
-                                    (value.values[childField.name] as? RekordValue.Primitive)?.value
-                                )
-                            }
-                    is RekordValue.CompositeList -> {}
+                val type = schema[fieldName]?.type
+                when {
+                    value is RekordValue.Composite ->
+                        idFieldNames(value.rekordType).forEach { childId ->
+                            put("${fieldName}_$childId", (value.values[childId] as? RekordValue.Primitive)?.value)
+                        }
+                    // A rekord written as none leaves the rekord holding it referring to none.
+                    value == null && type is RekordKType ->
+                        idFieldNames(type.rekordType()).forEach { childId -> put("${fieldName}_$childId", null) }
+                    value is RekordValue.CompositeList || type is RekordListKType -> {}
+                    else -> put(fieldName, (value as? RekordValue.Primitive)?.value)
                 }
             }
         }
-        connection().upsert(rekordType, primitiveValues, filter)
+        connection().upsert(rekordType, primitiveValues, filter?.toCondition(rekordType))
         for ((fieldName, value) in values) {
-            when (value) {
-                is RekordValue.Composite -> {
+            when {
+                value is RekordValue.Composite -> {
                     val f = buildIdFilter(value.rekordType, value.values)
                     upsertWithComposites(value.rekordType, value.values, f)
                 }
-                is RekordValue.CompositeList -> {
-                    val junctionTable = "${rekordType}_${fieldName}"
+                value is RekordValue.CompositeList -> {
+                    val junctionTable = junctionTable(rekordType, fieldName)
                     val parentIdValues = prefixedIdValues(rekordType, values)
                     // The list given replaces the list stored, so an item dropped from it loses
                     // its link too - a partial list written over a fuller one would otherwise
@@ -94,14 +91,17 @@ class SQLRekordsEditor(
                         val f = buildIdFilter(item.rekordType, item.values)
                         upsertWithComposites(item.rekordType, item.values, f)
                         // A link is nothing but its key, so there is nothing to update in one
-                        // already there - only one that is not to insert.
+                        // already there - only one that is not to insert. The links are inserted
+                        // in the order of the list, which reading them back follows.
                         connection().insertOrIgnore(
                             junctionTable,
                             parentIdValues + prefixedIdValues(item.rekordType, item.values),
                         )
                     }
                 }
-                else -> {}
+                // A list written as none holds nothing.
+                value == null && schema[fieldName]?.type is RekordListKType ->
+                    unlinkListItems(junctionTable(rekordType, fieldName), prefixedIdValues(rekordType, values))
             }
         }
     }
@@ -113,22 +113,17 @@ class SQLRekordsEditor(
      */
     private suspend fun unlinkListItems(junctionTable: String, parentIdValues: PrimitiveRekordValues) {
         if (parentIdValues.isEmpty() || parentIdValues.values.any { it == null }) return
-        connection().delete(junctionTable, buildFilter(parentIdValues))
+        connection().delete(junctionTable, buildFilter(parentIdValues)?.toSQLCondition(junctionTable))
     }
 
     // Extracts id field values prefixed with rekordType to avoid column name collisions in junction tables.
     // e.g. Game(id=1) -> {"Game_id": 1}
     private fun prefixedIdValues(rekordType: String, values: RekordValues): PrimitiveRekordValues =
-        rekordSchema(rekordType).values
-            .filter { it.field.id }
-            .associate { "${rekordType}_${it.field.name}" to (values[it.field.name] as? RekordValue.Primitive)?.value }
+        idFieldNames(rekordType)
+            .associate { "${rekordType}_$it" to (values[it] as? RekordValue.Primitive)?.value }
 
     private fun buildIdFilter(rekordType: String, values: RekordValues): Filter? =
-        buildFilter(
-            rekordSchema(rekordType).values
-                .filter { it.field.id }
-                .associate { it.field.name to (values[it.field.name] as? RekordValue.Primitive)?.value }
-        )
+        buildFilter(idFieldNames(rekordType).associateWith { (values[it] as? RekordValue.Primitive)?.value })
 
     private fun buildFilter(values: PrimitiveRekordValues): Filter? {
         val filters = values.mapNotNull { (name, v) -> v?.let { Filter.Equals(name, it) } }
@@ -139,83 +134,39 @@ class SQLRekordsEditor(
         }
     }
 
+    /**
+     * Deletes the rekords [filter] selects, and then their links to the rekords of their lists, by
+     * the ids of the rekords deleted: [filter] may look into the very lists whose links go, and is
+     * run while they are still there.
+     */
     override suspend fun delete(rekordType: String, filter: Filter?) {
-        rekordSchema(rekordType).values
-            .filter { it.type is RekordListKType }
-            .forEach { (fieldAnnotation, _) ->
-                connection().delete(
-                    "${rekordType}_${fieldAnnotation.name}",
-                    filter?.translateFieldNames { "${rekordType}_$it" }
-                )
-            }
-        connection().delete(rekordType, filter)
-    }
-
-    private fun Filter.translateFieldNames(transform: (String) -> String): Filter = when (this) {
-        is Filter.And -> Filter.And(filters.map { it.translateFieldNames(transform) })
-        is Filter.Or -> Filter.Or(filters.map { it.translateFieldNames(transform) })
-        is Filter.Not -> Filter.Not(filter.translateFieldNames(transform) as FieldFilter)
-        is FieldFilter.Nested -> Filter.Nested(transform(field), filter)
-        is FieldFilter.InList -> Filter.InList(transform(field), list)
-        is FieldFilter.Contains -> Filter.Contains(transform(field), value)
-        is FieldValueFilter.Equals -> Filter.Equals(transform(field), value)
-        is FieldValueFilter.LessThan -> Filter.LessThan(transform(field), value)
-        is FieldValueFilter.LessThanOrEquals -> Filter.LessThanOrEquals(transform(field), value)
-        is FieldValueFilter.GreaterThan -> Filter.GreaterThan(transform(field), value)
-        is FieldValueFilter.GreaterThanOrEquals -> Filter.GreaterThanOrEquals(transform(field), value)
-    }
-
-    private fun Filter.resolveNested(
-        rekordType: String,
-        joins: MutableList<SqlJoin>,
-    ): Filter = when (this) {
-        is Filter.And -> Filter.And(filters.map { it.resolveNested(rekordType, joins) })
-        is Filter.Or -> Filter.Or(filters.map { it.resolveNested(rekordType, joins) })
-        is Filter.Not -> Filter.Not(filter.resolveNested(rekordType, joins) as FieldFilter)
-        is FieldFilter.Nested -> {
-            when (val ktype = rekordSchema(rekordType)[field]?.type) {
-                is RekordKType -> {
-                    val childType = ktype.rekordType()
-                    val childIds = rekordSchema(childType).values.filter { it.field.id }.map { it.field.name }
-                    if (joins.none { it.table == childType }) {
-                        joins.add(SqlJoin(
-                            table = childType,
-                            onCondition = childIds.joinToString(" AND ") { c ->
-                                "$childType.$c = $rekordType.${field}_$c"
-                            }
-                        ))
-                    }
-                    filter.qualify(childType)
+        val condition = filter?.toCondition(rekordType)
+        val listFields = rekordSchema(rekordType).values.filter { it.type is RekordListKType }
+        val parentIds = idFieldNames(rekordType)
+        val parentKeys = if (condition != null && listFields.isNotEmpty() && parentIds.isNotEmpty()) {
+            connection().select(rekordType, parentIds, condition).map { row -> parentIds.map { row[it] } }
+        } else {
+            null
+        }
+        connection().delete(rekordType, condition)
+        for ((fieldAnnotation, _) in listFields) {
+            val junctionTable = junctionTable(rekordType, fieldAnnotation.name)
+            when {
+                condition == null -> connection().delete(junctionTable, condition = null)
+                parentKeys != null -> forEachKeyChunk(parentIds.map { "${rekordType}_$it" }, parentKeys) { keys ->
+                    connection().delete(junctionTable, keys.toSQLCondition(junctionTable))
                 }
-                is RekordListKType -> {
-                    val childType = ktype.elementRekordType()
-                    val childIds = rekordSchema(childType).values.filter { it.field.id }.map { it.field.name }
-                    val parentIds = rekordSchema(rekordType).values.filter { it.field.id }.map { it.field.name }
-                    val junction = "${rekordType}_${field}"
-                    if (joins.none { it.table == junction }) {
-                        joins.add(SqlJoin(
-                            table = junction,
-                            onCondition = parentIds.joinToString(" AND ") { p ->
-                                "$junction.${rekordType}_$p = $rekordType.$p"
-                            }
-                        ))
-                    }
-                    if (joins.none { it.table == childType }) {
-                        joins.add(SqlJoin(
-                            table = childType,
-                            onCondition = childIds.joinToString(" AND ") { c ->
-                                "$childType.$c = $junction.${childType}_$c"
-                            }
-                        ))
-                    }
-                    filter.qualify(childType)
-                }
-                else -> this
             }
         }
-        else -> this
     }
 
+    /**
+     * Reads the rekords [filter] selects from the table of [rekordType] alone, so that [limit] and
+     * [offset] count rekords, and then what they nest, field by field and level by level: each
+     * nested rekord type is read once per field it is in, for all the rekords read at the level
+     * above. A rekord nested at any depth is read that way, as is one type nested in several
+     * fields, and as many lists as a rekord has without their items being multiplied by each other.
+     */
     override suspend fun query(
         rekordType: String,
         fields: List<String>?,
@@ -224,40 +175,116 @@ class SQLRekordsEditor(
         limit: Int?,
         offset: Int?,
     ): List<RekordValues> {
-        val (columnNames, schemaJoins) = buildSelectSpec(rekordType, fields)
-        val nestedJoins = mutableListOf<SqlJoin>()
-        val resolvedFilter = filter?.resolveNested(rekordType, nestedJoins)
-        val allJoins = (schemaJoins + nestedJoins).distinctBy { it.table }
-        return connection()
-            .select(rekordType, columnNames, allJoins, resolvedFilter?.qualify(rekordType), orderBy, limit, offset)
-            .toRekordValues()
-            .map { coerceTypes(it, rekordType) }
+        val condition = filter?.toCondition(rekordType)
+        if (rekordSchema(rekordType).isEmpty()) {
+            // A table of no rekord type the schema declares is read as the rows it holds.
+            return connection()
+                .select(rekordType, fields, condition, orderBy, limit, offset)
+                .map { row -> row.mapValues { (_, value) -> value?.let { RekordValue.Primitive(it) } } }
+        }
+        val rows = connection().select(rekordType, columnNames = null, condition, orderBy, limit, offset).toList()
+        return read(rekordType, rows, fields)
     }
 
-    private fun coerceTypes(values: RekordValues, rekordType: String): RekordValues {
+    /** The rekords of [rekordType] [rows] hold, with the rekords they nest read as well. */
+    private suspend fun read(
+        rekordType: String,
+        rows: List<PrimitiveRekordValues>,
+        fields: List<String>?,
+    ): List<RekordValues> {
         val schema = rekordSchema(rekordType)
-        if (schema.isEmpty()) return values
-        return values.mapValues { (fieldName, value) ->
-            when (value) {
-                null -> null
-                is RekordValue.Primitive -> {
-                    val ktype = schema[fieldName]?.type
-                        ?: return@mapValues value
-                    RekordValue.Primitive(coercePrimitive(value.value, ktype))
+        val rekords: List<MutableMap<String, RekordValue?>> = rows.map { row ->
+            buildMap {
+                for ((field, type) in schema.values) {
+                    if (type is RekordKType || type is RekordListKType) continue
+                    if (fields != null && field.name !in fields) continue
+                    put(field.name, row[field.name]?.let { RekordValue.Primitive(coercePrimitive(it, type)) })
                 }
-                is RekordValue.Composite ->
-                    RekordValue.Composite(
-                        value.rekordType,
-                        coerceTypes(value.values, value.rekordType)
+            }.toMutableMap()
+        }
+        for ((field, type) in schema.values) {
+            when (type) {
+                is RekordKType -> {
+                    val childType = type.rekordType()
+                    val childIds = idFieldNames(childType)
+                    // The ids a row refers to its rekord by, none of which is null if it refers to one.
+                    val keys = rows.map { row ->
+                        childIds.map { row["${field.name}_$it"] }.takeIf { key -> key.isNotEmpty() && key.none { it == null } }
+                    }
+                    val children = readByIds(childType, keys.filterNotNull().distinct())
+                    rekords.forEachIndexed { index, rekord -> rekord[field.name] = keys[index]?.let { children[it] } }
+                }
+                is RekordListKType -> {
+                    val childType = type.elementRekordType()
+                    val parentIds = idFieldNames(rekordType)
+                    val childIds = idFieldNames(childType)
+                    val junctionTable = junctionTable(rekordType, field.name)
+                    val parentColumns = parentIds.map { "${rekordType}_$it" }
+                    val childColumns = childIds.map { "${childType}_$it" }
+                    val parentKeys = rows.map { row -> parentIds.map { row[it] } }
+                    val links = selectByKeys(junctionTable, parentColumns, parentKeys.distinct(), orderBy = INSERTION_ORDER)
+                    val linked: Map<List<PrimitiveRekordValue?>, List<List<PrimitiveRekordValue?>>> = links.groupBy(
+                        keySelector = { link -> parentColumns.map { link[it] } },
+                        valueTransform = { link -> childColumns.map { link[it] } },
                     )
-                is RekordValue.CompositeList ->
-                    RekordValue.CompositeList(value.list.map { item ->
-                        RekordValue.Composite(
-                            item.rekordType,
-                            coerceTypes(item.values, item.rekordType)
-                        )
-                    })
+                    val children = readByIds(childType, linked.values.flatten().distinct())
+                    rekords.forEachIndexed { index, rekord ->
+                        val items = linked[parentKeys[index]].orEmpty().mapNotNull { children[it] }
+                        // A list stored is never told from one written empty, but a list that cannot
+                        // be null is read as one, empty or not.
+                        rekord[field.name] = if (items.isEmpty() && type.isMarkedNullable) null else RekordValue.CompositeList(items)
+                    }
+                }
+                else -> Unit
             }
+        }
+        return rekords
+    }
+
+    /** The rekords of [rekordType] [keys] identify, by the values of its ids, each as it is read. */
+    private suspend fun readByIds(
+        rekordType: String,
+        keys: List<List<PrimitiveRekordValue?>>,
+    ): Map<List<PrimitiveRekordValue?>, RekordValue.Composite> {
+        if (keys.isEmpty()) return emptyMap()
+        val ids = idFieldNames(rekordType)
+        val rows = selectByKeys(rekordType, ids, keys)
+        val rekords = read(rekordType, rows, fields = null)
+        return rows.indices.associate { index ->
+            ids.map { rows[index][it] } to RekordValue.Composite(rekordType, rekords[index])
+        }
+    }
+
+    /** The rows of [tableName] whose [columns] hold one of [keys]. */
+    private suspend fun selectByKeys(
+        tableName: String,
+        columns: List<String>,
+        keys: List<List<PrimitiveRekordValue?>>,
+        orderBy: List<Order>? = null,
+    ): List<PrimitiveRekordValues> = buildList {
+        forEachKeyChunk(columns, keys) { chunk ->
+            addAll(connection().select(tableName, columnNames = null, chunk.toSQLCondition(tableName), orderBy))
+        }
+    }
+
+    /**
+     * Runs [action] with a filter selecting the rows whose [columns] hold one of [keys], a chunk of
+     * them at a time so that no statement holds more variables than SQLite takes - 999 before its
+     * version 3.32.
+     */
+    private suspend fun forEachKeyChunk(
+        columns: List<String>,
+        keys: List<List<PrimitiveRekordValue?>>,
+        action: suspend (Filter) -> Unit,
+    ) {
+        if (keys.isEmpty() || columns.isEmpty()) return
+        for (chunk in keys.chunked(maxOf(1, MAX_VARIABLES / columns.size))) {
+            val filter = if (columns.size == 1) {
+                Filter.InList(columns.single(), chunk.map { it.single() })
+            } else {
+                Filter.Or(chunk.map { key -> Filter.And(columns.zip(key) { column, value -> Filter.Equals(column, value) }) })
+            }
+            action(filter)
         }
     }
 
@@ -275,85 +302,22 @@ class SQLRekordsEditor(
             else -> value
         }
 
-    private fun buildSelectSpec(
-        rekordType: String,
-        fields: List<String>?,
-    ): Pair<List<String>?, List<SqlJoin>> {
-        val schema = rekordSchema(rekordType)
-        if (schema.isEmpty()) return fields to emptyList()
+    override suspend fun count(rekordType: String, filter: Filter?): Int =
+        connection().count(rekordType, filter?.toCondition(rekordType))
 
-        val parentIds = schema.values.filter { it.field.id }.map { it.field.name }
-        val columnNames = mutableListOf<String>()
-        val joins = mutableListOf<SqlJoin>()
+    private fun conditionBuilder(): SQLConditionBuilder = SQLConditionBuilder(schemaOf = ::rekordSchema)
 
-        for ((fieldAnnotation, ktype) in schema.values) {
-            when {
-                ktype is RekordKType -> {
-                    val childType = ktype.rekordType()
-                    val childSchema = rekordSchema(childType)
-                    val childIds = childSchema.values.filter { it.field.id }.map { it.field.name }
-                    joins.add(
-                        SqlJoin(
-                            table = childType,
-                            onCondition = childIds.joinToString(" AND ") { c ->
-                                "$childType.$c = $rekordType.${fieldAnnotation.name}_$c"
-                            },
-                        )
-                    )
-                    childSchema.values
-                        .filter { it.type !is RekordKType && it.type !is RekordListKType }
-                        .forEach { (childField, _) ->
-                            columnNames.add(
-                                "$childType.${childField.name} AS \"${fieldAnnotation.name}$SEP${childType}$SEP${childField.name}\""
-                            )
-                        }
-                }
-                ktype is RekordListKType -> {
-                    val childType = ktype.elementRekordType()
-                    val childSchema = rekordSchema(childType)
-                    val childIds = childSchema.values.filter { it.field.id }.map { it.field.name }
-                    val junction = "${rekordType}_${fieldAnnotation.name}"
-                    joins.add(
-                        SqlJoin(
-                            table = junction,
-                            onCondition = parentIds.joinToString(" AND ") { p ->
-                                "$junction.${rekordType}_$p = $rekordType.$p"
-                            },
-                        )
-                    )
-                    joins.add(
-                        SqlJoin(
-                            table = childType,
-                            onCondition = childIds.joinToString(" AND ") { c ->
-                                "$childType.$c = $junction.${childType}_$c"
-                            },
-                        )
-                    )
-                    childSchema.values
-                        .filter { it.type !is RekordKType && it.type !is RekordListKType }
-                        .forEach { (childField, _) ->
-                            columnNames.add(
-                                "$childType.${childField.name} AS \"${fieldAnnotation.name}$LIST_SUFFIX$SEP${childType}$SEP${childField.name}\""
-                            )
-                        }
-                }
-                else -> if (fields == null || fieldAnnotation.name in fields) {
-                    columnNames.add("$rekordType.${fieldAnnotation.name} AS ${fieldAnnotation.name}")
-                }
-            }
-        }
-        return columnNames.takeIf { it.isNotEmpty() } to joins
-    }
+    private fun Filter.toCondition(rekordType: String): SQLCondition =
+        conditionBuilder().build(this, rekordType, alias = rekordType)
 
-    override suspend fun count(rekordType: String, filter: Filter?): Int {
-        val nestedJoins = mutableListOf<SqlJoin>()
-        val resolvedFilter = filter?.resolveNested(rekordType, nestedJoins)
-        if (nestedJoins.isEmpty()) return connection().count(rekordType, resolvedFilter)
-        return connection().select(
-            tableName = rekordType,
-            columnNames = listOf("COUNT(*)"),
-            joins = nestedJoins,
-            filter = resolvedFilter?.qualify(rekordType),
-        ).firstIntValue() ?: 0
+    private fun idFieldNames(rekordType: String): List<String> = conditionBuilder().idFieldNames(rekordType)
+
+    private companion object {
+
+        /** Fewer variables than the 999 a statement of SQLite before 3.32 takes. */
+        const val MAX_VARIABLES = 900
+
+        /** The order rows were inserted in, which is that of the rowid a table has by default. */
+        val INSERTION_ORDER = listOf(Order.Ascending("rowid"))
     }
 }

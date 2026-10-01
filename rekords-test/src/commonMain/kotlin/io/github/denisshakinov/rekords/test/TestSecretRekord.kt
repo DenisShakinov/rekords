@@ -32,6 +32,9 @@ data class TestSecretRekord(
     val vault: TestSecretVaultRekord,
     @Field(name = TAGS)
     val tags: List<TestSecretTagRekord>,
+    /** Of the type the list holds, and nullable, so that each is told from the other and from none. */
+    @Field(name = PINNED_TAG)
+    val pinnedTag: TestSecretTagRekord?,
 ) {
     companion object {
         const val REKORD_TYPE = "secret"
@@ -46,6 +49,7 @@ data class TestSecretRekord(
         const val CREATED = "created"
         const val VAULT = "vault"
         const val TAGS = "tags"
+        const val PINNED_TAG = "pinned_tag"
     }
 }
 

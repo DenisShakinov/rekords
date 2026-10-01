@@ -58,17 +58,13 @@ kotlin {
             implementation(npm("@noble/hashes", libs.versions.noble.hashes.get()))
         }
         commonTest.dependencies {
-            implementation(libs.kotlin.test)
-        }
-        jvmTest.dependencies {
             implementation(projects.rekordsMemory)
             implementation(projects.rekordsTest)
+            implementation(libs.kotlin.test)
             implementation(libs.kotlinx.coroutines.test)
         }
         webTest.dependencies {
             implementation(projects.rekordsIndexeddb)
-            implementation(projects.rekordsTest)
-            implementation(libs.kotlinx.coroutines.test)
             // Node, which the tests run in, has no IndexedDB of its own.
             implementation(npm("fake-indexeddb", "6.2.5"))
         }

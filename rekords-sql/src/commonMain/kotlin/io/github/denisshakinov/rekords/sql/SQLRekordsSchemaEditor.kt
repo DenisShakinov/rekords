@@ -29,7 +29,7 @@ class SQLRekordsSchemaEditor(
         return connection().select(
             tableName = META_TABLE,
             columnNames = listOf(VALUE_COLUMN),
-            filter = Filter.Equals(KEY_COLUMN, VERSION_KEY),
+            condition = Filter.Equals(KEY_COLUMN, VERSION_KEY).toSQLCondition(META_TABLE),
             limit = 1,
         ).firstStringValue()?.toInt() ?: 0
     }
@@ -42,7 +42,7 @@ class SQLRekordsSchemaEditor(
                 KEY_COLUMN to VERSION_KEY,
                 VALUE_COLUMN to newVersion.toString(),
             ),
-            filter = Filter.Equals(KEY_COLUMN, VERSION_KEY),
+            condition = Filter.Equals(KEY_COLUMN, VERSION_KEY).toSQLCondition(META_TABLE),
         )
     }
 
