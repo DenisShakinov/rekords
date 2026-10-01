@@ -3,10 +3,7 @@ package io.github.denisshakinov.rekords.memory
 import io.github.denisshakinov.rekords.test.RekordsEncryptionTest
 import kotlin.test.Test
 
-/**
- * Runs the shared encryption suite against the in-memory editor - but for the migration, which
- * the editor makes no change for: it keeps whatever fields it is handed.
- */
+/** Runs the shared encryption suite against the in-memory editor. */
 class InMemoryRekordsEncryptionTest : RekordsEncryptionTest(InMemoryRekordsEditor()) {
 
     @Test
@@ -35,4 +32,7 @@ class InMemoryRekordsEncryptionTest : RekordsEncryptionTest(InMemoryRekordsEdito
 
     @Test
     override fun check_store_without_cipher_fails_on_encrypted_schema() = super.check_store_without_cipher_fails_on_encrypted_schema()
+
+    @Test
+    override fun check_migration_adds_encrypted_fields_with_their_defaults() = super.check_migration_adds_encrypted_fields_with_their_defaults()
 }

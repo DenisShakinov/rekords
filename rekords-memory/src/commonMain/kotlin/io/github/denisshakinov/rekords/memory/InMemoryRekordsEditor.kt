@@ -18,7 +18,9 @@ import io.github.denisshakinov.rekords.core.matches
 import io.github.denisshakinov.rekords.core.pinnedValues
 import io.github.denisshakinov.rekords.core.rekordSchema
 import io.github.denisshakinov.rekords.core.runOnEditor
+import io.github.denisshakinov.rekords.core.toStoredValue
 import kotlin.reflect.KClass
+import kotlin.reflect.KType
 
 /**
  * A [RekordsEditor] keeping rekords in memory.
@@ -34,9 +36,9 @@ import kotlin.reflect.KClass
  * A transaction is rolled back through a [Journal] of what it changed, so that it costs what it
  * changes rather than what is stored.
  *
- * The schema is never migrated here, its editor leaving the rekords as they are: nothing outlives
- * the process, so every store starts from an empty storage it creates, and a storage kept at an
- * older version - the only thing a migration is for - is never met.
+ * A migration changes the rekords stored the way the other editors change their storage: nothing
+ * outlives the process, but one editor is free to be given to a store of a newer schema version,
+ * which then upgrades what it holds - as a test of a migration does.
  */
 class InMemoryRekordsEditor : RekordsEditor {
 
@@ -54,21 +56,71 @@ class InMemoryRekordsEditor : RekordsEditor {
             version = newVersion
         }
 
+        /** A table is created by the first rekord of its type, so there is nothing to make ahead. */
         override suspend fun addRekordType(rekordClass: KClass<*>) {}
-        override suspend fun removeRekordType(rekordType: String) {}
-        override suspend fun renameRekordType(oldRekordType: String, newRekordType: String) {}
+
+        /**
+         * Drops the rekords of [rekordType], and what refers to them with them: a parent no longer
+         * holds a rekord of it, nor has one in its lists, as a storage looking them up finds none.
+         */
+        override suspend fun removeRekordType(rekordType: String) {
+            val removed = tables.remove(rekordType) ?: return
+            journal.record { tables[rekordType] = removed }
+            tables.values.forEach { table ->
+                table.alter { values -> values.replaceComposites(rekordType) { null } }
+            }
+        }
+
+        /**
+         * Files the rekords of [oldRekordType] under [newRekordType], and has every parent refer to
+         * them as rekords of it - which the type a nested rekord is read with is taken from.
+         */
+        override suspend fun renameRekordType(oldRekordType: String, newRekordType: String) {
+            val renamed = tables.remove(oldRekordType) ?: return
+            val replaced = tables.put(newRekordType, renamed)
+            journal.record {
+                tables.remove(newRekordType)
+                replaced?.let { tables[newRekordType] = it }
+                tables[oldRekordType] = renamed
+            }
+            restructure(newRekordType) {}
+            tables.values.forEach { table ->
+                table.alter { values ->
+                    values.replaceComposites(oldRekordType) { RekordValue.Composite(newRekordType, it.values) }
+                }
+            }
+        }
+
+        /**
+         * Gives every rekord of [rekordType] the field [field], holding [defaultValue] - or, when
+         * that is null, the value of the field's type that stands for none, or no value for a
+         * nullable one. A rekord holding the field already keeps what it holds.
+         */
         override suspend fun addField(
             rekordType: String,
             field: FieldWithType,
             defaultValue: PrimitiveRekordValue?,
         ) {
+            val (annotation, type) = field
+            val storedValue = defaultValue.toStoredValue()
+            require(storedValue == null || type.holds(storedValue)) {
+                "$defaultValue cannot be the default value of ${annotation.name} in $rekordType"
+            }
+            val fillValue = storedValue ?: if (type.isMarkedNullable) null else type.noneValue()
+            restructure(rekordType) { values ->
+                if (annotation.name !in values) values[annotation.name] = fillValue?.let { RekordValue.Primitive(it) }
+            }
         }
-        override suspend fun removeField(rekordType: String, fieldName: String) {}
+
+        override suspend fun removeField(rekordType: String, fieldName: String) =
+            restructure(rekordType) { values -> values.remove(fieldName) }
+
         override suspend fun renameField(
             rekordType: String,
             oldFieldName: String,
             newFieldName: String
-        ) {
+        ) = restructure(rekordType) { values ->
+            if (oldFieldName in values) values[newFieldName] = values.remove(oldFieldName)
         }
     }
 
@@ -93,20 +145,30 @@ class InMemoryRekordsEditor : RekordsEditor {
 
     private fun table(rekordType: String): RekordTable {
         return tables.getOrPut(rekordType) {
-            val fields: Collection<FieldWithType> = fields(rekordType)
-            val idFields: List<String> = fields.filter { it.field.id }.map { it.field.name }
-            val searchableFields: List<String> =
-                fields.filter { it.field.searchable }.map { it.field.name }
-            RekordTable(
-                journal = journal,
-                idFields = idFields,
-                // A single id field is what the key already is, so indexing it would answer
-                // nothing the key does not. Several are each worth an index, for the filters that
-                // name some of them and leave the rest free.
-                indexedFields = (idFields.takeIf { it.size > 1 }.orEmpty() + searchableFields)
-                    .distinct(),
-            )
+            val (idFields, indexedFields) = structure(rekordType)
+            RekordTable(journal = journal, idFields = idFields, indexedFields = indexedFields)
         }
+    }
+
+    /** The fields the rekords of [rekordType] are filed under, and those they are indexed by. */
+    private fun structure(rekordType: String): Pair<List<String>, List<String>> {
+        val fields: Collection<FieldWithType> = fields(rekordType)
+        val idFields: List<String> = fields.filter { it.field.id }.map { it.field.name }
+        val searchableFields: List<String> = fields.filter { it.field.searchable }.map { it.field.name }
+        // A single id field is what the key already is, so indexing it would answer nothing the
+        // key does not. Several are each worth an index, for the filters that name some of them
+        // and leave the rest free.
+        return idFields to (idFields.takeIf { it.size > 1 }.orEmpty() + searchableFields).distinct()
+    }
+
+    /**
+     * Applies [change] to the rekords of [rekordType], filed and indexed afterwards as the schema
+     * the migration runs for has them. A type no rekord has been stored of has nothing to change.
+     */
+    private fun restructure(rekordType: String, change: (MutableRekordValues) -> Unit) {
+        val table = tables[rekordType] ?: return
+        val (idFields, indexedFields) = structure(rekordType)
+        table.alter(idFields, indexedFields, change)
     }
 
     /**
@@ -191,15 +253,22 @@ class InMemoryRekordsEditor : RekordsEditor {
  */
 private class RekordTable(
     private val journal: Journal,
-    private val idFields: List<String>,
+    idFields: List<String>,
     indexedFields: List<String>,
 ) {
 
     private val rekords: MutableMap<RekordKey, MutableRekordValues> = mutableMapOf()
 
+    /** The fields the rekords are filed under, which a migration may change. */
+    var idFields: List<String> = idFields
+        private set
+
     /** For each indexed field, the keys of the rekords holding a given value of it. */
-    private val indexes: Map<String, MutableMap<PrimitiveRekordValue?, MutableSet<RekordKey>>> =
+    private var indexes: Map<String, MutableMap<PrimitiveRekordValue?, MutableSet<RekordKey>>> =
         indexedFields.associateWith { mutableMapOf() }
+
+    /** The fields an index is kept for. */
+    val indexedFields: List<String> get() = indexes.keys.toList()
 
     /** Numbers the rekords no ids can be read from, so that each is kept rather than merged. */
     private var keylessCount: Long = 0
@@ -267,6 +336,59 @@ private class RekordTable(
         }
         val narrowed = narrow(filter) ?: return rekords.values.count { it.matches(filter) }
         return narrowed.count { key -> rekords[key]?.matches(filter) == true }
+    }
+
+    /**
+     * Applies [change] to every rekord, in the very map stored - which the parents holding it hold
+     * too - and files them anew under [idFields], indexed by [indexedFields]: what a migration
+     * does, changing the fields either is drawn from as well as the rekords.
+     *
+     * Ids two rekords come to share leave the one filed last, as an update does. A rekord no ids
+     * are read from keeps the key it had.
+     */
+    fun alter(
+        idFields: List<String>,
+        indexedFields: List<String>,
+        change: (MutableRekordValues) -> Unit,
+    ) {
+        val previousEntries: List<Pair<RekordKey, MutableRekordValues>> = rekords.map { (key, values) -> key to values }
+        val previousValues: List<RekordValues>? = if (journal.isOpen) previousEntries.map { (_, values) -> values.toMap() } else null
+        val previousIdFields = this.idFields
+        val previousIndexedFields = this.indexedFields
+        previousEntries.forEach { (_, values) -> change(values) }
+        refile(idFields, indexedFields, previousEntries)
+        if (previousValues != null) {
+            journal.record {
+                previousEntries.forEachIndexed { index, (_, values) ->
+                    values.clear()
+                    values.putAll(previousValues[index])
+                }
+                this.idFields = previousIdFields
+                rekords.clear()
+                indexes = previousIndexedFields.associateWith { mutableMapOf() }
+                previousEntries.forEach { (key, values) ->
+                    rekords[key] = values
+                    index(key, values)
+                }
+            }
+        }
+    }
+
+    /** Applies [change] to every rekord, leaving what they are filed under and indexed by as it is. */
+    fun alter(change: (MutableRekordValues) -> Unit) = alter(idFields, indexedFields, change)
+
+    private fun refile(
+        idFields: List<String>,
+        indexedFields: List<String>,
+        entries: List<Pair<RekordKey, MutableRekordValues>>,
+    ) {
+        this.idFields = idFields
+        rekords.clear()
+        indexes = indexedFields.associateWith { mutableMapOf() }
+        for ((key, values) in entries) {
+            rekords[keyOf(values) ?: key.takeIf { it is RekordKey.Ordinal } ?: RekordKey.Ordinal(keylessCount++)] = values
+        }
+        rekords.forEach { (key, values) -> index(key, values) }
     }
 
     /**
@@ -423,6 +545,49 @@ private sealed interface RekordKey {
 
 private fun RekordValues.primitive(fieldName: String): PrimitiveRekordValue? =
     (this[fieldName] as? RekordValue.Primitive)?.value
+
+/**
+ * Replaces each rekord of [rekordType] these values hold with what [replacement] makes of it - in
+ * a field of its own, where null leaves the field holding none, or in a list, where null drops it.
+ */
+private fun MutableRekordValues.replaceComposites(
+    rekordType: String,
+    replacement: (RekordValue.Composite) -> RekordValue.Composite?,
+) {
+    for ((fieldName, value) in entries.toList()) {
+        when (value) {
+            is RekordValue.Composite -> if (value.rekordType == rekordType) this[fieldName] = replacement(value)
+            is RekordValue.CompositeList -> if (value.list.any { it.rekordType == rekordType }) {
+                this[fieldName] = RekordValue.CompositeList(
+                    value.list.mapNotNull { if (it.rekordType == rekordType) replacement(it) else it }
+                )
+            }
+            else -> Unit
+        }
+    }
+}
+
+/**
+ * Whether [value], encoded the way a rekord's fields are, is one a field of this type holds - the
+ * way a SQL column of the type tells.
+ */
+private fun KType.holds(value: PrimitiveRekordValue): Boolean = when (classifier) {
+    Int::class, Long::class, Boolean::class -> value is Int || value is Long || value is Boolean
+    Float::class, Double::class -> value is Float || value is Double
+    String::class -> value is String
+    else -> false
+}
+
+/** The value of this type that stands for none. */
+private fun KType.noneValue(): PrimitiveRekordValue = when (classifier) {
+    Int::class -> 0
+    Long::class -> 0L
+    Float::class -> 0f
+    Double::class -> 0.0
+    Boolean::class -> false
+    String::class -> ""
+    else -> throw IllegalArgumentException("No value stands for none of $this")
+}
 
 /**
  * What the transaction running has changed, kept as the steps that take each change back.

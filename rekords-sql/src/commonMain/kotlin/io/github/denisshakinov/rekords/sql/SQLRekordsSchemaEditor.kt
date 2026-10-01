@@ -100,30 +100,38 @@ class SQLRekordsSchemaEditor(
         connection().rawQuery("DROP TABLE IF EXISTS $rekordType")
     }
 
+    /**
+     * Renames the table of [oldRekordType], and the columns its ids are kept in wherever they are
+     * named after it: in the junction tables of the lists holding its rekords, and in those of its
+     * own lists.
+     *
+     * The schema a migration runs for knows the type by [newRekordType], unless the type is renamed
+     * on its way to that name - as one renamed twice is - so its fields are read under either.
+     */
     override suspend fun renameRekordType(oldRekordType: String, newRekordType: String) {
-        val oldSchema = rekordSchema(oldRekordType).values
-        val childIdColumnRenames = oldSchema
-            .filter { it.field.id }
+        val typeSchema = rekordSchema(newRekordType).ifEmpty { rekordSchema(oldRekordType) }.values
+        val idColumnRenames = typeSchema
+            .filter { it.field.id && it.type !is RekordKType && it.type !is RekordListKType }
             .associate { (field, _) -> "${oldRekordType}_${field.name}" to "${newRekordType}_${field.name}" }
-        if (childIdColumnRenames.isNotEmpty()) {
+        if (idColumnRenames.isNotEmpty()) {
             schema.rekordTypes.forEach { parentClass ->
                 val parentType = parentClass.rekordType()
                 parentClass.allFields()
                     .filter { (_, ktype) ->
-                        ktype is RekordListKType && ktype.elementRekordType() == oldRekordType
+                        ktype is RekordListKType && ktype.elementRekordType() in setOf(oldRekordType, newRekordType)
                     }
                     .forEach { (field, _) ->
-                        recreateTable("${parentType}_${field.name}", columnRenames = childIdColumnRenames)
+                        recreateTable("${parentType}_${field.name}", columnRenames = idColumnRenames)
                     }
             }
         }
         connection().rawQuery("ALTER TABLE $oldRekordType RENAME TO $newRekordType")
-        oldSchema
+        typeSchema
             .filter { it.type is RekordListKType }
             .forEach { (field, _) ->
-                connection().rawQuery(
-                    "ALTER TABLE ${oldRekordType}_${field.name} RENAME TO ${newRekordType}_${field.name}"
-                )
+                val junctionTable = "${newRekordType}_${field.name}"
+                connection().rawQuery("ALTER TABLE ${oldRekordType}_${field.name} RENAME TO $junctionTable")
+                if (idColumnRenames.isNotEmpty()) recreateTable(junctionTable, columnRenames = idColumnRenames)
             }
     }
 

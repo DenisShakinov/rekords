@@ -1,6 +1,6 @@
 @file:OptIn(InternalRekordsApi::class)
 
-package io.github.denisshakinov.rekords.indexeddb
+package io.github.denisshakinov.rekords.test
 
 import io.github.denisshakinov.rekords.core.Filter
 import io.github.denisshakinov.rekords.core.InternalRekordsApi
@@ -8,31 +8,27 @@ import io.github.denisshakinov.rekords.core.RekordsEditor
 import io.github.denisshakinov.rekords.core.RekordsMigrationEditor
 import io.github.denisshakinov.rekords.core.RekordsStore
 import io.github.denisshakinov.rekords.core.addField
+import io.github.denisshakinov.rekords.core.addRekordType
 import io.github.denisshakinov.rekords.core.asRekordValue
 import io.github.denisshakinov.rekords.core.put
 import io.github.denisshakinov.rekords.core.removeField
 import io.github.denisshakinov.rekords.core.renameField
-import io.github.denisshakinov.rekords.test.TestGamePropertyRekord
-import io.github.denisshakinov.rekords.test.TestGameRekord
-import io.github.denisshakinov.rekords.test.TestGameStateRekord
-import io.github.denisshakinov.rekords.test.TestRekordsSchema
-import io.github.denisshakinov.rekords.test.TestUpgradingSchema
 import kotlinx.coroutines.test.runTest
 import kotlinx.datetime.LocalDate
-import kotlin.test.Test
 import kotlin.test.assertEquals
 import kotlin.test.assertTrue
 
 /**
- * What a migration does to the rekords IndexedDB keeps, which the shared suite cannot ask about:
- * the in-memory editor, which it runs against as well, never migrates.
+ * What a migration does to the rekords [rekordsEditor] keeps: each store is given the schema at the
+ * version after the one the storage is at, so that the tests of a run sharing one storage upgrade
+ * it each in turn.
  */
-class IndexedDBMigrationTest {
-
-    private val rekordsEditor: RekordsEditor = IndexedDBRekordsEditor(nextMigrationDatabaseName())
+abstract class RekordsMigrationTest(private val rekordsEditor: RekordsEditor) {
 
     private suspend fun storeWithDoom(): RekordsStore {
         val store = RekordsStore(TestRekordsSchema(), rekordsEditor)
+        store.delete<TestGameRekord>().getOrThrow()
+        store.delete<TestGamePropertyRekord>().getOrThrow()
         store.putRekord(doom()).getOrThrow()
         return store
     }
@@ -42,13 +38,15 @@ class IndexedDBMigrationTest {
         return RekordsStore(TestUpgradingSchema(version = version + 1, upgrade), rekordsEditor)
     }
 
+    private suspend fun RekordsStore.doom(): TestGameRekord? =
+        getRekord<TestGameRekord>(Filter.Equals(TestGameRekord.ID, 1)).getOrThrow()
+
     /**
      * A field a migration adds is given, in the rekords already stored, the default value it is
      * added with - or, given none, the value of its type that stands for none where it cannot be
      * null, and no value where it can.
      */
-    @Test
-    fun field_added_by_a_migration_is_given_its_default_value() = runTest {
+    open fun check_field_added_by_a_migration_is_given_its_default_value() = runTest {
         storeWithDoom()
         val upgradedStore = upgrade {
             removeField<TestGameRekord>(TestGameRekord.RELEASE_DATE)
@@ -65,7 +63,7 @@ class IndexedDBMigrationTest {
             addField<TestGameStateRekord>(TestGameStateRekord.NAME, "Unknown")
         }
 
-        val doom = upgradedStore.getRekord<TestGameRekord>(Filter.Equals(TestGameRekord.ID, 1)).getOrThrow()
+        val doom = upgradedStore.doom()
         assertEquals(expected = LocalDate(1970, 1, 1), actual = doom?.releaseDate)
         assertEquals(expected = false, actual = doom?.finished)
         assertEquals(expected = 7.5f, actual = doom?.score)
@@ -75,8 +73,7 @@ class IndexedDBMigrationTest {
     }
 
     /** A default value the field cannot hold fails the migration, which leaves the storage as it was. */
-    @Test
-    fun default_value_the_field_cannot_hold_fails_the_migration() = runTest {
+    open fun check_default_value_the_field_cannot_hold_fails_the_migration() = runTest {
         val store = storeWithDoom()
         val version = rekordsEditor.schemaEditor.version()
         val upgradedStore = upgrade {
@@ -88,16 +85,14 @@ class IndexedDBMigrationTest {
 
         assertTrue(failure is IllegalArgumentException, "Failed with $failure")
         assertEquals(expected = version, actual = rekordsEditor.schemaEditor.version())
-        val doom = store.getRekord<TestGameRekord>(Filter.Equals(TestGameRekord.ID, 1))
-        assertEquals(expected = 9.5f, actual = doom.getOrThrow()?.score)
+        assertEquals(expected = 9.5f, actual = store.doom()?.score)
     }
 
     /**
      * A field renamed keeps its values, and a searchable one its index: the rekords are found by
      * it afterwards, and not by the values they held before.
      */
-    @Test
-    fun field_renamed_by_a_migration_keeps_its_values_and_index() = runTest {
+    open fun check_field_renamed_by_a_migration_keeps_its_values_and_index() = runTest {
         storeWithDoom()
         val upgradedStore = upgrade {
             for (field in listOf(TestGamePropertyRekord.LOCALE, TestGamePropertyRekord.TITLE)) {
@@ -121,39 +116,77 @@ class IndexedDBMigrationTest {
         assertEquals(expected = emptyList(), actual = fps)
     }
 
-    /** A rekord type renamed keeps its rekords, and the parents referring to them still see them. */
-    @Test
-    fun rekord_type_renamed_by_a_migration_keeps_its_rekords() = runTest {
+    /**
+     * A rekord type renamed keeps its rekords and its lists, and the parents referring to them
+     * still see them - renamed to a name the schema has or from one, as each of these is.
+     */
+    open fun check_rekord_type_renamed_by_a_migration_keeps_its_rekords() = runTest {
         storeWithDoom()
         val upgradedStore = upgrade {
             renameRekordType(PROPERTY_TYPE, "property_before")
             renameRekordType("property_before", PROPERTY_TYPE)
+            renameRekordType(STATE_TYPE, "state_before")
+            renameRekordType("state_before", STATE_TYPE)
+            renameRekordType(GAME_TYPE, "game_before")
+            renameRekordType("game_before", GAME_TYPE)
         }
 
-        val doom = upgradedStore.getRekord<TestGameRekord>(Filter.Equals(TestGameRekord.ID, 1)).getOrThrow()
+        val doom = upgradedStore.doom()
         assertEquals(expected = listOf("fps"), actual = doom?.properties?.map { it.id })
+        assertEquals(expected = "Completed", actual = doom?.state?.name)
         val found = upgradedStore
             .getRekords<TestGamePropertyRekord>(Filter.Equals(TestGamePropertyRekord.TITLE, "FPS"))
             .getOrThrow()
         assertEquals(expected = listOf("fps"), actual = found.map { it.id })
     }
 
-    /** A [Long] a JavaScript number cannot hold exactly is kept exactly all the same. */
-    @Test
-    fun long_beyond_what_a_number_holds_is_kept_exactly() = runTest {
-        val store = RekordsStore(TestRekordsSchema(), rekordsEditor)
-        store.putRekord(doom(steamId = Long.MAX_VALUE)).getOrThrow()
+    /** A rekord type removed takes its rekords with it, and the parents no longer hold them. */
+    open fun check_rekord_type_removed_by_a_migration_takes_its_rekords() = runTest {
+        storeWithDoom()
+        val upgradedStore = upgrade {
+            removeRekordType(PROPERTY_TYPE)
+            addRekordType<TestGamePropertyRekord>()
+        }
 
-        val doom = store.getRekord<TestGameRekord>(Filter.Equals(TestGameRekord.ID, 1)).getOrThrow()
-        assertEquals(expected = Long.MAX_VALUE, actual = doom?.steamId)
+        assertEquals(expected = 0, actual = upgradedStore.count<TestGamePropertyRekord>().getOrThrow())
+        assertEquals(expected = emptyList(), actual = upgradedStore.doom()?.properties)
     }
 
-    private fun doom(steamId: Long? = null) = TestGameRekord(
+    /**
+     * A migration that fails takes back every change it made to the storage before - to fields and
+     * rekord types as much as to rekords - and the version it was to upgrade to.
+     */
+    open fun check_failed_migration_takes_back_the_changes_it_made() = runTest {
+        val store = storeWithDoom()
+        val version = rekordsEditor.schemaEditor.version()
+        val upgradedStore = upgrade {
+            renameField(PROPERTY_TYPE, TestGamePropertyRekord.TITLE, "title_before")
+            removeField<TestGameRekord>(TestGameRekord.SCORE)
+            addField<TestGameRekord>(TestGameRekord.SCORE, 1f)
+            renameRekordType(STATE_TYPE, "state_before")
+            removeRekordType(PROPERTY_TYPE)
+            error("The upgrade fails after its changes")
+        }
+
+        assertTrue(upgradedStore.count<TestGameRekord>().isFailure)
+        assertEquals(expected = version, actual = rekordsEditor.schemaEditor.version())
+        assertEquals(expected = doom().describe(), actual = store.doom()?.describe())
+        val found = store
+            .getRekords<TestGamePropertyRekord>(Filter.Equals(TestGamePropertyRekord.TITLE, "FPS"))
+            .getOrThrow()
+        assertEquals(expected = listOf("fps"), actual = found.map { it.id })
+    }
+
+    /** What a game holds, as a line to compare: the rekords are no data classes. */
+    private fun TestGameRekord.describe(): String =
+        "$id $title $releaseDate $remasterDate $finished $score ${state.id} ${state.name} " +
+            properties.joinToString { "${it.id} ${it.type} ${it.title} ${it.locale}" }
+
+    private fun doom() = TestGameRekord(
         id = 1,
         title = "Doom",
         releaseDate = LocalDate(1993, 12, 10),
         remasterDate = LocalDate(2019, 7, 26),
-        steamId = steamId,
         finished = true,
         score = 9.5f,
         state = TestGameStateRekord(id = 3, name = "Completed"),
@@ -169,12 +202,7 @@ class IndexedDBMigrationTest {
 
     private companion object {
         const val PROPERTY_TYPE = "game_property"
+        const val STATE_TYPE = "game_state"
+        const val GAME_TYPE = TestGameRekord.REKORD_TYPE
     }
-}
-
-private var migrationDatabaseCount = 0
-
-private fun nextMigrationDatabaseName(): String {
-    installFakeIndexedDB()
-    return "rekords-migration-test-${migrationDatabaseCount++}"
 }
