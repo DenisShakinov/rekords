@@ -86,6 +86,9 @@ kotlin {
 
 ## Usage
 
+The [`sample`](sample) module runs every scenario below on the JVM, the cache in memory included:
+`./gradlew :sample:run`.
+
 ### Rekords
 
 A rekord is a class annotated with `@Rekord`, whose constructor properties are `@Field`s. The fields

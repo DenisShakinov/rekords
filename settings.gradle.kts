@@ -37,4 +37,5 @@ include(
     ":rekords-sql",
     ":rekords-sqlite",
     ":rekords-test",
+    ":sample",
 )
