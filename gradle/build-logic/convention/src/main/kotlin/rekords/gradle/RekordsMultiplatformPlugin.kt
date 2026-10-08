@@ -9,6 +9,7 @@ import org.gradle.kotlin.dsl.configure
 import org.gradle.kotlin.dsl.getByType
 import org.gradle.kotlin.dsl.withType
 import org.jetbrains.kotlin.gradle.ExperimentalWasmDsl
+import org.jetbrains.kotlin.gradle.dsl.JvmTarget
 import org.jetbrains.kotlin.gradle.dsl.KotlinMultiplatformExtension
 import org.jetbrains.kotlin.gradle.plugin.KotlinSourceSet
 import org.jetbrains.kotlin.gradle.plugin.mpp.KotlinNativeTarget
@@ -68,10 +69,20 @@ internal fun Project.configureTargets(targets: Set<RekordsTarget>) {
                     namespace = androidNamespace()
                     compileSdk = libs.version("android.compile.sdk").toInt()
                     minSdk = libs.version("android.min.sdk").toInt()
+                    compilerOptions {
+                        jvmTarget.set(jvmTarget())
+                    }
+                }
+                // Compiled by the toolchain's JDK, but for the runtimes consumers have:
+                // `-Xjdk-release` keeps the JDK's newer API out as well as its newer bytecode.
+                RekordsTarget.Jvm -> jvm {
+                    compilerOptions {
+                        jvmTarget.set(jvmTarget())
+                        freeCompilerArgs.add("-Xjdk-release=${jvmTarget().target}")
+                    }
                 }
                 // Libraries only ship klibs, so the web targets declare a Node.js environment for
                 // their tests and nothing else. Consumers stay free to run them in a browser.
-                RekordsTarget.Jvm -> jvm()
                 RekordsTarget.Js -> js { nodejs() }
                 RekordsTarget.WasmJs -> wasmJs { nodejs() }
                 RekordsTarget.WasmWasi -> wasmWasi { nodejs() }
@@ -118,6 +129,8 @@ private val Project.libs: VersionCatalog
     get() = extensions.getByType<VersionCatalogsExtension>().named("libs")
 
 private fun VersionCatalog.version(name: String): String = findVersion(name).get().displayName
+
+private fun Project.jvmTarget(): JvmTarget = JvmTarget.fromTarget(libs.version("jvm.target"))
 
 private fun Project.projectPath(): String = path.substring(1).replace(":", "_")
 
