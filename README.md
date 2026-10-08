@@ -7,13 +7,36 @@ Kotlin Multiplatform storage for annotated classes. Describe what you keep as `@
 declare a schema with its migrations, and read and write them from common code. Where they end up —
 SQLite, the browser's IndexedDB or memory — is decided by the engine each target depends on.
 
+## Why Rekords
+
+Rekords is meant to stay simple and lightweight. It ships no database of its own and uses the one
+the platform already has: the operating system's SQLite on Android, Apple platforms and Linux, and
+IndexedDB in the browser, on Kotlin/JS and Kotlin/Wasm. The JVM is the exception, where the SQLite
+comes bundled with `androidx.sqlite`. How much smaller an application gets has not been measured
+yet, but where every megabyte counts, it may be worth a look.
+
+The API is not tied to SQL at all: an engine can keep rekords in whatever storage it likes. Models,
+schemas and queries are written once in common code, and every engine supports everything
+`rekords-core` offers, so they behave the same on every target.
+
+## What you get
+
 - Plain Kotlin classes, mapped by `kotlinx.serialization` — no code generation step.
 - Filters, ordering, paging and counting.
-- Nested rekords and lists of them, stored once and shared between the rekords referring to them.
+- Nested rekords and lists of them, stored once and shared between the rekords referring to them,
+  and filtered by their fields.
 - Transactions: several operations applied together or not at all.
 - Versioned schemas with migrations run in a transaction of their own.
 - Engines found on their own: common code creates the store, each target's dependencies choose the
-  storage.
+  storage — SQLite, IndexedDB, or memory for tests and caching. Another engine can be plugged in.
+- Encrypted fields: `rekords-crypto` encrypts single fields with AES, deterministically, so that
+  rekords are still looked up by them, or randomized.
+
+## When to use something else
+
+Rekords is not a drop-in replacement for Room or SQLDelight. If full SQL on every target suits you
+and you need complex queries, those libraries are the better choice. Rekords is for a simple API
+that does not depend on the storage, and a smaller footprint.
 
 ## Modules
 
@@ -22,7 +45,7 @@ SQLite, the browser's IndexedDB or memory — is decided by the engine each targ
 | `rekords-core`      | Annotations, schema, `RekordsStore`, filters and the engine API | Android, JVM, JS, Wasm JS, Wasm WASI, iOS, macOS, tvOS, watchOS, Linux, Windows (MinGW), Android Native |
 | `rekords-sqlite`    | Engine keeping rekords in SQLite, through `androidx.sqlite`     | Android, JVM, iOS, macOS, tvOS, watchOS, Linux (no Intel targets on Apple platforms)                 |
 | `rekords-indexeddb` | Engine keeping rekords in the browser's IndexedDB               | JS, Wasm JS                                                                                             |
-| `rekords-memory`    | Engine keeping rekords in memory, for tests                     | Same as `rekords-core`                                                                                  |
+| `rekords-memory`    | Engine keeping rekords in memory, for tests or as a cache       | Same as `rekords-core`                                                                                  |
 | `rekords-crypto`    | AES cipher encrypting the fields of rekords on every engine     | Android, JVM, JS, Wasm JS, iOS, macOS, tvOS, watchOS, Linux, Windows (MinGW) (no Intel targets on Apple platforms but iOS) |
 | `rekords-sql`       | The SQL editor the SQL engines are built on                     | Same as `rekords-core`                                                                                  |
 
@@ -127,6 +150,10 @@ A new storage is created with every rekord type of the schema, and `onCreate` ca
 one is handed to `onUpgrade`, which can add, remove and rename rekord types and fields, and read
 and write rekords while at it. A migration that fails leaves the storage as it was, and is tried
 again by the next operation.
+
+The application keeps nothing but its latest schema. The classes and schemas of past versions are
+not kept, only the steps between them: `onUpgrade` takes a storage of any earlier version through
+every `if (oldVersion < n)` after its own, in turn, up to the latest.
 
 ### Store
 
@@ -260,6 +287,39 @@ val store = RekordsStore(NotesSchema()) {
 }
 ```
 
+### Caching in memory
+
+An in-memory store can serve as the application's cache in front of a persistent one: rekords are
+read and written in memory, written to the storage from time to time — on a timer, or as the
+application goes to the background — and read back from it at start:
+
+```kotlin
+val cache = RekordsStore(NotesSchema(), InMemory)
+val storage = RekordsStore(NotesSchema()) {
+    name = "notes.db"
+}
+
+// At start: fill the cache from the storage.
+cache.putRekords(storage.getRekords<NoteRekord>().getOrThrow()).getOrThrow()
+
+// From time to time: replace what the storage holds with what the cache does, in one transaction.
+val notes = cache.getRekords<NoteRekord>().getOrThrow()
+storage.transaction {
+    delete<NoteRekord>()
+    putRekords(notes)
+}.getOrThrow()
+```
+
+- `InMemory` does not register itself, so a target depending on `rekords-memory` still creates the
+  storage with the engine it depends on.
+- Nested rekords are written along with the rekords holding them. The ones a deleted rekord held
+  stay in the storage, though, until their own type is deleted.
+- A transaction runs nothing but its own store's operations, so the cache is read before it. What is
+  written to the cache meanwhile waits for the next write to the storage, and what the storage has
+  not been given yet is lost with the process.
+- Writing everything again costs as much as the cache holds. A bigger cache can write only the
+  rekords that changed, and delete the ones removed, if the application keeps track of them.
+
 ## Platform notes
 
 ### SQLite
@@ -293,30 +353,6 @@ runs in.
 
 The library builds with JDK 25. `./gradlew jvmTest jsNodeTest wasmJsNodeTest` runs the tests on
 the JVM, Node.js and Wasm; the native test tasks, such as `macosArm64Test`, need Xcode.
-
-## Releasing
-
-The modules are published to Maven Central with the
-[Gradle Maven Publish Plugin](https://vanniktech.github.io/gradle-maven-publish-plugin/central/).
-The credentials and the signing key are read from `~/.gradle/gradle.properties`, never from the
-repository:
-
-```properties
-mavenCentralUsername=<Central Portal token username>
-mavenCentralPassword=<Central Portal token password>
-signingInMemoryKey=<ASCII-armored private key>
-signingInMemoryKeyId=<last 8 characters of the key id>
-signingInMemoryKeyPassword=<key password>
-```
-
-Set a release `version` in `gradle.properties`, then run on macOS, which builds every target:
-
-```shell
-./gradlew publishToMavenCentral
-```
-
-The deployment is then released from the [Central Portal](https://central.sonatype.com/publishing).
-A `-SNAPSHOT` version is not signed, so `./gradlew publishToMavenLocal` works without a key.
 
 ## License
 
