@@ -43,11 +43,15 @@ that does not depend on the storage, and a smaller footprint.
 | Module              | What it is                                                     | Targets                                                                                                 |
 |---------------------|----------------------------------------------------------------|---------------------------------------------------------------------------------------------------------|
 | `rekords-core`      | Annotations, schema, `RekordsStore`, filters and the engine API | Android, JVM, JS, Wasm JS, Wasm WASI, iOS, macOS, tvOS, watchOS, Linux, Windows (MinGW), Android Native |
-| `rekords-sqlite`    | Engine keeping rekords in SQLite, through `androidx.sqlite`     | Android, JVM, iOS, macOS, tvOS, watchOS, Linux (no Intel targets on Apple platforms)                 |
+| `rekords-sqlite`    | Engine keeping rekords in SQLite, through `androidx.sqlite`     | Android, JVM, iOS, macOS, tvOS, watchOS, Linux (no iOS simulator on Intel)                           |
 | `rekords-indexeddb` | Engine keeping rekords in the browser's IndexedDB               | JS, Wasm JS                                                                                             |
 | `rekords-memory`    | Engine keeping rekords in memory, for tests or as a cache       | Same as `rekords-core`                                                                                  |
-| `rekords-crypto`    | AES cipher encrypting the fields of rekords on every engine     | Android, JVM, JS, Wasm JS, iOS, macOS, tvOS, watchOS, Linux, Windows (MinGW) (no Intel targets on Apple platforms but iOS) |
+| `rekords-crypto`    | AES cipher encrypting the fields of rekords on every engine     | Android, JVM, JS, Wasm JS, iOS, macOS, tvOS, watchOS, Linux, Windows (MinGW)                          |
 | `rekords-sql`       | The SQL editor the SQL engines are built on                     | Same as `rekords-core`                                                                                  |
+
+Apple platforms are built for Apple silicon, and iOS for the simulator on Intel as well. The targets
+Kotlin [deprecates](https://kotl.in/native-targets-tiers) — macOS, tvOS and watchOS on Intel, and
+32-bit watchOS — are not.
 
 ## Setup
 

@@ -5,6 +5,10 @@ package rekords.gradle
  *
  * The enum lists every target the library as a whole can reach; each module declares the subset its
  * own dependencies allow via `rekords { targets(...) }`.
+ *
+ * The targets Kotlin deprecates are left out - `macosX64`, `tvosX64`, `watchosX64` and
+ * `watchosArm32`, see https://kotl.in/native-targets-tiers - as every target published costs a
+ * publication per module, and Maven Central limits how many files a month an organization publishes.
  */
 enum class RekordsTarget {
     Android,
@@ -16,15 +20,11 @@ enum class RekordsTarget {
     IosSimulatorArm64,
     IosX64,
     MacosArm64,
-    MacosX64,
     TvosArm64,
     TvosSimulatorArm64,
-    TvosX64,
-    WatchosArm32,
     WatchosArm64,
     WatchosDeviceArm64,
     WatchosSimulatorArm64,
-    WatchosX64,
     LinuxArm64,
     LinuxX64,
     MingwX64,

@@ -20,7 +20,6 @@ rekords {
         RekordsTarget.MacosArm64,
         RekordsTarget.TvosArm64,
         RekordsTarget.TvosSimulatorArm64,
-        RekordsTarget.WatchosArm32,
         RekordsTarget.WatchosArm64,
         RekordsTarget.WatchosDeviceArm64,
         RekordsTarget.WatchosSimulatorArm64,
