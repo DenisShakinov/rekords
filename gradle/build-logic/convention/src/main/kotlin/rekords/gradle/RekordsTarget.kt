@@ -38,5 +38,28 @@ enum class RekordsTarget {
 
         /** Every target the rekords library can be built for. */
         val all: Set<RekordsTarget> get() = entries.toSet()
+
+        /**
+         * What androidx.sqlite reaches, and so the SQLite engine and the SQL editor it is built on:
+         * `sqlite-framework` covers Android and the native targets, `sqlite-bundled` covers the
+         * JVM. Neither is published for Windows, which the JVM reaches instead. The web targets are
+         * left out on purpose - there `SQLiteDriver` is a suspending interface served by a web
+         * worker, so `sqlite-web` needs an adapter of its own rather than the one in
+         * SQLiteSQLDriver.
+         */
+        val sqlite: Set<RekordsTarget> = setOf(
+            Android,
+            Jvm,
+            IosArm64,
+            IosSimulatorArm64,
+            MacosArm64,
+            TvosArm64,
+            TvosSimulatorArm64,
+            WatchosArm64,
+            WatchosDeviceArm64,
+            WatchosSimulatorArm64,
+            LinuxArm64,
+            LinuxX64,
+        )
     }
 }

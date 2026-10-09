@@ -8,24 +8,8 @@ plugins {
 }
 
 rekords {
-    // What androidx.sqlite reaches: `sqlite-framework` covers Android and the native targets,
-    // `sqlite-bundled` covers the JVM. The web targets are left out on purpose - there
-    // `SQLiteDriver` is a suspending interface served by a web worker, so `sqlite-web` needs an
-    // adapter of its own rather than the one in SQLiteSQLDriver.
-    targets(
-        RekordsTarget.Android,
-        RekordsTarget.Jvm,
-        RekordsTarget.IosArm64,
-        RekordsTarget.IosSimulatorArm64,
-        RekordsTarget.MacosArm64,
-        RekordsTarget.TvosArm64,
-        RekordsTarget.TvosSimulatorArm64,
-        RekordsTarget.WatchosArm64,
-        RekordsTarget.WatchosDeviceArm64,
-        RekordsTarget.WatchosSimulatorArm64,
-        RekordsTarget.LinuxArm64,
-        RekordsTarget.LinuxX64,
-    )
+    // See RekordsTarget.sqlite.
+    targets(RekordsTarget.sqlite)
     // NativeSQLiteDriver binds the SQLite the operating system ships, so every native binary built
     // from this module states the flag - the test executables included.
     linkSystemSQLite()
