@@ -14,6 +14,7 @@ import io.github.denisshakinov.rekords.core.RekordValues
 import io.github.denisshakinov.rekords.core.RekordsEditor
 import io.github.denisshakinov.rekords.core.RekordsSchemaEditor
 import io.github.denisshakinov.rekords.core.elementRekordType
+import io.github.denisshakinov.rekords.core.primitiveAt
 import io.github.denisshakinov.rekords.core.rekordSchema
 import io.github.denisshakinov.rekords.core.rekordType
 import io.github.denisshakinov.rekords.core.runOnEditor
@@ -61,8 +62,8 @@ class SQLRekordsEditor(
                 val type = schema[fieldName]?.type
                 when {
                     value is RekordValue.Composite ->
-                        idFieldNames(value.rekordType).forEach { childId ->
-                            put("${fieldName}_$childId", (value.values[childId] as? RekordValue.Primitive)?.value)
+                        idColumns(value.rekordType).forEach { childId ->
+                            put("${fieldName}_${childId.name}", value.values.primitiveAt(childId.path))
                         }
                     // A rekord written as none leaves the rekord holding it referring to none.
                     value == null && type is RekordKType ->
@@ -119,11 +120,11 @@ class SQLRekordsEditor(
     // Extracts id field values prefixed with rekordType to avoid column name collisions in junction tables.
     // e.g. Game(id=1) -> {"Game_id": 1}
     private fun prefixedIdValues(rekordType: String, values: RekordValues): PrimitiveRekordValues =
-        idFieldNames(rekordType)
-            .associate { "${rekordType}_$it" to (values[it] as? RekordValue.Primitive)?.value }
+        idColumns(rekordType)
+            .associate { "${rekordType}_${it.name}" to values.primitiveAt(it.path) }
 
     private fun buildIdFilter(rekordType: String, values: RekordValues): Filter? =
-        buildFilter(idFieldNames(rekordType).associateWith { (values[it] as? RekordValue.Primitive)?.value })
+        buildFilter(idColumns(rekordType).associate { it.name to values.primitiveAt(it.path) })
 
     private fun buildFilter(values: PrimitiveRekordValues): Filter? {
         val filters = values.mapNotNull { (name, v) -> v?.let { Filter.Equals(name, it) } }
@@ -311,6 +312,8 @@ class SQLRekordsEditor(
         conditionBuilder().build(this, rekordType, alias = rekordType)
 
     private fun idFieldNames(rekordType: String): List<String> = conditionBuilder().idFieldNames(rekordType)
+
+    private fun idColumns(rekordType: String): List<IdColumn> = conditionBuilder().idColumns(rekordType)
 
     private companion object {
 

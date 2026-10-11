@@ -156,7 +156,7 @@ suspend inline fun <reified R> RekordsEditor.putRekord(rekord: R, filter: Filter
     val values: RekordValues = encode(rekord)
     return put<R>(
         values = values,
-        filter = idsFilter(values, idFields<R>()) + filter,
+        filter = idsFilter(values, allFields<R>()) + filter,
     )
 }
 
@@ -173,7 +173,7 @@ suspend inline fun <reified R> RekordsEditor.delete(filter: Filter? = null) =
     delete(rekordType<R>(), filter)
 
 suspend inline fun <reified R> RekordsEditor.deleteRekord(rekord: R) =
-    delete<R>(filter = idsFilter(encode(rekord), idFields<R>()))
+    delete<R>(filter = idsFilter(encode(rekord), allFields<R>()))
 
 suspend inline fun <reified R> RekordsEditor.query(
     fields: List<String>? = null,
@@ -204,15 +204,23 @@ suspend inline fun <reified R> RekordsEditor.getRekords(
 suspend inline fun <reified R> RekordsEditor.count(filter: Filter? = null): Int =
     count(rekordType<R>(), filter)
 
+/**
+ * The filter selecting the rekord [values] are of, by the id fields among [fields]. An id holding a
+ * rekord selects by the ids of that rekord, as deep as they nest.
+ */
 @InternalRekordsApi
-fun idsFilter(values: RekordValues, idFields: List<String>): Filter {
-    if (idFields.size == 1) {
-        return equalsFilter(values, idFields.first())
-    }
-    return Filter.And(idFields.map { field -> equalsFilter(values, field) })
+fun idsFilter(values: RekordValues, fields: Collection<FieldWithType>): Filter {
+    val filters: List<FieldFilter> = idFilters(values, fields)
+    return filters.singleOrNull() ?: Filter.And(filters)
 }
 
-private fun equalsFilter(values: RekordValues, field: String): Filter {
-    val value = (values[field] as? RekordValue.Primitive)?.value
-    return Filter.Equals(field, value = value)
-}
+/** A filter for each id, an id of a rekord held being looked for in the field holding it. */
+private fun idFilters(values: RekordValues, fields: Collection<FieldWithType>): List<FieldFilter> =
+    fields.filter { it.field.id }.flatMap { (field, type) ->
+        val value: RekordValue? = values[field.name]
+        if (type is RekordKType && value is RekordValue.Composite) {
+            idFilters(value.values, type.allFields()).map { Filter.Nested(field.name, it) }
+        } else {
+            listOf(Filter.Equals(field.name, value = (value as? RekordValue.Primitive)?.value))
+        }
+    }

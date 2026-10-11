@@ -54,21 +54,35 @@ class SQLRekordsSchemaEditor(
         // Read before any table is built: a junction table is keyed by the ids of its parent, and
         // a list field declared ahead of them would otherwise be given only the ids that had been
         // walked past by then.
-        val parentIdFields: List<Pair<Field, SQLType>> = fields.primitiveIdFields()
+        val parentIdColumns: List<Pair<String, SQLType>> = fields.idColumns()
+        // A rekord held by a field is referred to by columns named after the field and the ids of
+        // the rekord, which another field may be named as already.
+        val columnFields = mutableMapOf<String, String>()
+        fun addColumn(column: SQLColumn, fieldName: String) {
+            val otherFieldName: String? = columnFields.put(column.name, fieldName)
+            require(otherFieldName == null) {
+                "$otherFieldName and $fieldName of $tableName would both be kept in the column " +
+                    "${column.name}: rename one of them."
+            }
+            columns.add(column)
+        }
 
         for ((fieldAnnotation, fieldType) in fields) {
             when (fieldType) {
                 is RekordListKType ->
-                    createJunctionTable(tableName, fieldAnnotation.name, parentIdFields, fieldType)
+                    createJunctionTable(tableName, fieldAnnotation.name, parentIdColumns, fieldType)
+                // An id holding a rekord is the key of that rekord, kept in the columns referring
+                // to it - which are then part of this table's key as well.
                 is RekordKType ->
-                    fieldType.allFields().primitiveIdFields().forEach { (childField, sqlType) ->
+                    fieldType.allFields().idColumns().forEach { (childColumn, sqlType) ->
                         val nullable = if (fieldType.isMarkedNullable) sqlType.asNullable() else sqlType
-                        columns.add(
-                            SQLColumn("${fieldAnnotation.name}_${childField.name}", isPrimaryKey = false, nullable)
+                        addColumn(
+                            SQLColumn("${fieldAnnotation.name}_$childColumn", isPrimaryKey = fieldAnnotation.id, nullable),
+                            fieldAnnotation.name,
                         )
                     }
                 else -> {
-                    columns.add((fieldAnnotation to fieldType).toSqlColumn())
+                    addColumn((fieldAnnotation to fieldType).toSqlColumn(), fieldAnnotation.name)
                     if (fieldAnnotation.searchable) indices.add(fieldAnnotation.name)
                 }
             }
@@ -79,16 +93,16 @@ class SQLRekordsSchemaEditor(
     private suspend fun createJunctionTable(
         parentRekordType: String,
         fieldName: String,
-        parentIdFields: List<Pair<Field, SQLType>>,
+        parentIdColumns: List<Pair<String, SQLType>>,
         listKType: RekordListKType,
     ) {
         val childRekordType = listKType.elementRekordType()
         val columns = buildList {
-            parentIdFields.forEach { (field, sqlType) ->
-                add(SQLColumn("${parentRekordType}_${field.name}", isPrimaryKey = true, sqlType))
+            parentIdColumns.forEach { (column, sqlType) ->
+                add(SQLColumn("${parentRekordType}_$column", isPrimaryKey = true, sqlType))
             }
-            listKType.elementAllFields().primitiveIdFields().forEach { (childField, sqlType) ->
-                add(SQLColumn("${childRekordType}_${childField.name}", isPrimaryKey = true, sqlType))
+            listKType.elementAllFields().idColumns().forEach { (childColumn, sqlType) ->
+                add(SQLColumn("${childRekordType}_$childColumn", isPrimaryKey = true, sqlType))
             }
         }
         connection().createTable("${parentRekordType}_${fieldName}", columns)
@@ -110,9 +124,8 @@ class SQLRekordsSchemaEditor(
      */
     override suspend fun renameRekordType(oldRekordType: String, newRekordType: String) {
         val typeSchema = rekordSchema(newRekordType).ifEmpty { rekordSchema(oldRekordType) }.values
-        val idColumnRenames = typeSchema
-            .filter { it.field.id && it.type !is RekordKType && it.type !is RekordListKType }
-            .associate { (field, _) -> "${oldRekordType}_${field.name}" to "${newRekordType}_${field.name}" }
+        val idColumnRenames = typeSchema.idColumns()
+            .associate { (column, _) -> "${oldRekordType}_$column" to "${newRekordType}_$column" }
         if (idColumnRenames.isNotEmpty()) {
             schema.rekordTypes.forEach { parentClass ->
                 val parentType = parentClass.rekordType()
@@ -240,13 +253,19 @@ class SQLRekordsSchemaEditor(
     }
 }
 
-private fun List<FieldWithType>.primitiveIdFields(): List<Pair<Field, SQLType>> = buildList {
-    for ((field, ktype) in this@primitiveIdFields) {
-        if (!field.id) continue
-        if (ktype is RekordKType || ktype is RekordListKType) continue
-        add(field to ktype.toSQLType())
+/**
+ * The columns the ids of a rekord with these fields are kept in, with their types: an id of its
+ * own is a column, one holding a rekord a column for each id of that rekord, named after the field
+ * and the id - as deep as they nest.
+ */
+private fun Collection<FieldWithType>.idColumns(): List<Pair<String, SQLType>> =
+    filter { it.field.id }.flatMap { (field, ktype) ->
+        when (ktype) {
+            is RekordKType -> ktype.allFields().idColumns().map { (column, sqlType) -> "${field.name}_$column" to sqlType }
+            is RekordListKType -> emptyList()
+            else -> listOf(field.name to ktype.toSQLType())
+        }
     }
-}
 
 private suspend fun SQLConnection.createTable(
     tableName: String,

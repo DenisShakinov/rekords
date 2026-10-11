@@ -12,6 +12,7 @@ import io.github.denisshakinov.rekords.core.RekordKType
 import io.github.denisshakinov.rekords.core.RekordListKType
 import io.github.denisshakinov.rekords.core.elementRekordType
 import io.github.denisshakinov.rekords.core.field
+import io.github.denisshakinov.rekords.core.idPaths
 import io.github.denisshakinov.rekords.core.rekordType
 import io.github.denisshakinov.rekords.core.type
 
@@ -97,7 +98,7 @@ internal class SQLConditionBuilder(
         alias: String,
         args: MutableList<PrimitiveRekordValue?>,
     ): String = when (val type = schemaOf(rekordType)[filter.field]?.type) {
-        is RekordKType -> {
+        is RekordKType -> referenceCondition(filter, rekordType, alias, prefix = "", args) ?: run {
             val childType = type.rekordType()
             val child = nextAlias()
             val link = idFieldNames(childType).joinToString(" AND ") { id ->
@@ -125,10 +126,51 @@ internal class SQLConditionBuilder(
         else -> condition(filter.filter, rekordType, alias, args)
     }
 
-    /** The fields identifying a rekord of [rekordType], which what refers to it is made of. */
-    fun idFieldNames(rekordType: String): List<String> = schemaOf(rekordType).values
-        .filter { it.field.id && it.type !is RekordKType && it.type !is RekordListKType }
-        .map { it.field.name }
+    /**
+     * The condition [filter] makes of the row [alias] reaches when it looks into an id holding a
+     * rekord for the value of one of that rekord's ids, as a filter selecting a rekord by its ids
+     * does: the row holds that value in a column of its own, the one named [prefix] and the path
+     * to it, and is told by it without the rekord's table being read. The rekord is then found
+     * whether the one it holds is stored or not, as a key is. Null when [filter] asks anything else.
+     */
+    private fun referenceCondition(
+        filter: FieldFilter,
+        rekordType: String,
+        alias: String,
+        prefix: String,
+        args: MutableList<PrimitiveRekordValue?>,
+    ): String? = when (filter) {
+        is FieldValueFilter.Equals -> {
+            val (field, type) = schemaOf(rekordType)[filter.field] ?: return null
+            if (!field.id || type is RekordKType || type is RekordListKType) return null
+            if (filter.value == null) {
+                "($alias.$prefix${filter.field} IS NULL)"
+            } else {
+                args += filter.value
+                "($alias.$prefix${filter.field} = ?)"
+            }
+        }
+        is FieldFilter.Nested -> {
+            val (field, type) = schemaOf(rekordType)[filter.field] ?: return null
+            if (field.id && type is RekordKType) {
+                referenceCondition(filter.filter, type.rekordType(), alias, "$prefix${filter.field}_", args)
+            } else {
+                null
+            }
+        }
+        else -> null
+    }
+
+    /**
+     * The columns identifying a rekord of [rekordType], which what refers to it is made of: an id of
+     * its own is a column, one holding a rekord is a column for each id of that rekord, named after
+     * the field and the id. See [idColumns].
+     */
+    fun idFieldNames(rekordType: String): List<String> = idColumns(rekordType).map { it.name }
+
+    /** The columns identifying a rekord of [rekordType], each with the fields its value is read from. */
+    fun idColumns(rekordType: String): List<IdColumn> =
+        schemaOf(rekordType).values.idPaths().map { path -> IdColumn(path.joinToString("_"), path) }
 
     private fun nextAlias(): String = "_r${++aliasCount}"
 
@@ -143,6 +185,9 @@ internal class SQLConditionBuilder(
         return if (conditions.isEmpty()) "($whenNone)" else conditions.joinToString(separator, "(", ")")
     }
 }
+
+/** A column an id of a rekord is kept in, named [name], holding the value [path] leads to. */
+internal class IdColumn(val name: String, val path: List<String>)
 
 /** The table the rekords of the list [field] of [rekordType] are linked to theirs in. */
 internal fun junctionTable(rekordType: String, field: String): String = "${rekordType}_$field"

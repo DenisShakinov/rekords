@@ -13,9 +13,12 @@ import io.github.denisshakinov.rekords.core.RekordValues
 import io.github.denisshakinov.rekords.core.RekordsEditor
 import io.github.denisshakinov.rekords.core.RekordsSchemaEditor
 import io.github.denisshakinov.rekords.core.compareTo
+import io.github.denisshakinov.rekords.core.containsPath
 import io.github.denisshakinov.rekords.core.field
+import io.github.denisshakinov.rekords.core.idPaths
 import io.github.denisshakinov.rekords.core.matches
 import io.github.denisshakinov.rekords.core.pinnedValues
+import io.github.denisshakinov.rekords.core.primitiveAt
 import io.github.denisshakinov.rekords.core.rekordSchema
 import io.github.denisshakinov.rekords.core.runOnEditor
 import io.github.denisshakinov.rekords.core.toStoredValue
@@ -145,20 +148,25 @@ class InMemoryRekordsEditor : RekordsEditor {
 
     private fun table(rekordType: String): RekordTable {
         return tables.getOrPut(rekordType) {
-            val (idFields, indexedFields) = structure(rekordType)
-            RekordTable(journal = journal, idFields = idFields, indexedFields = indexedFields)
+            val (idPaths, indexedFields) = structure(rekordType)
+            RekordTable(journal = journal, idPaths = idPaths, indexedFields = indexedFields)
         }
     }
 
-    /** The fields the rekords of [rekordType] are filed under, and those they are indexed by. */
-    private fun structure(rekordType: String): Pair<List<String>, List<String>> {
+    /**
+     * The ids the rekords of [rekordType] are filed under, each as the fields its value is read
+     * through - see [idPaths] - and the fields they are indexed by.
+     */
+    private fun structure(rekordType: String): Pair<List<List<String>>, List<String>> {
         val fields: Collection<FieldWithType> = fields(rekordType)
-        val idFields: List<String> = fields.filter { it.field.id }.map { it.field.name }
+        val idPaths: List<List<String>> = fields.idPaths()
         val searchableFields: List<String> = fields.filter { it.field.searchable }.map { it.field.name }
-        // A single id field is what the key already is, so indexing it would answer nothing the
-        // key does not. Several are each worth an index, for the filters that name some of them
-        // and leave the rest free.
-        return idFields to (idFields.takeIf { it.size > 1 }.orEmpty() + searchableFields).distinct()
+        // A single id is what the key already is, so indexing it would answer nothing the key does
+        // not. Several are each worth an index, for the filters that name some of them and leave
+        // the rest free - those of the rekord's own, an index holding values rather than rekords.
+        val indexedIds: List<String> = idPaths.takeIf { it.size > 1 }.orEmpty()
+            .mapNotNull { path -> path.singleOrNull() }
+        return idPaths to (indexedIds + searchableFields).distinct()
     }
 
     /**
@@ -167,8 +175,8 @@ class InMemoryRekordsEditor : RekordsEditor {
      */
     private fun restructure(rekordType: String, change: (MutableRekordValues) -> Unit) {
         val table = tables[rekordType] ?: return
-        val (idFields, indexedFields) = structure(rekordType)
-        table.alter(idFields, indexedFields, change)
+        val (idPaths, indexedFields) = structure(rekordType)
+        table.alter(idPaths, indexedFields, change)
     }
 
     /**
@@ -244,7 +252,7 @@ class InMemoryRekordsEditor : RekordsEditor {
 }
 
 /**
- * The rekords of one rekord type, each filed under the key its [idFields] make and listed in an
+ * The rekords of one rekord type, each filed under the key its [idPaths] make and listed in an
  * index for each of [indexedFields].
  *
  * Keys are held in the order they were first stored in, which is the order rekords are handed back
@@ -253,14 +261,17 @@ class InMemoryRekordsEditor : RekordsEditor {
  */
 private class RekordTable(
     private val journal: Journal,
-    idFields: List<String>,
+    idPaths: List<List<String>>,
     indexedFields: List<String>,
 ) {
 
     private val rekords: MutableMap<RekordKey, MutableRekordValues> = mutableMapOf()
 
-    /** The fields the rekords are filed under, which a migration may change. */
-    var idFields: List<String> = idFields
+    /**
+     * The ids the rekords are filed under, each as the fields its value is read through - an id
+     * holding a rekord being read through it into that rekord's ids. A migration may change them.
+     */
+    var idPaths: List<List<String>> = idPaths
         private set
 
     /** For each indexed field, the keys of the rekords holding a given value of it. */
@@ -340,30 +351,30 @@ private class RekordTable(
 
     /**
      * Applies [change] to every rekord, in the very map stored - which the parents holding it hold
-     * too - and files them anew under [idFields], indexed by [indexedFields]: what a migration
+     * too - and files them anew under [idPaths], indexed by [indexedFields]: what a migration
      * does, changing the fields either is drawn from as well as the rekords.
      *
      * Ids two rekords come to share leave the one filed last, as an update does. A rekord no ids
      * are read from keeps the key it had.
      */
     fun alter(
-        idFields: List<String>,
+        idPaths: List<List<String>>,
         indexedFields: List<String>,
         change: (MutableRekordValues) -> Unit,
     ) {
         val previousEntries: List<Pair<RekordKey, MutableRekordValues>> = rekords.map { (key, values) -> key to values }
         val previousValues: List<RekordValues>? = if (journal.isOpen) previousEntries.map { (_, values) -> values.toMap() } else null
-        val previousIdFields = this.idFields
+        val previousIdPaths = this.idPaths
         val previousIndexedFields = this.indexedFields
         previousEntries.forEach { (_, values) -> change(values) }
-        refile(idFields, indexedFields, previousEntries)
+        refile(idPaths, indexedFields, previousEntries)
         if (previousValues != null) {
             journal.record {
                 previousEntries.forEachIndexed { index, (_, values) ->
                     values.clear()
                     values.putAll(previousValues[index])
                 }
-                this.idFields = previousIdFields
+                this.idPaths = previousIdPaths
                 rekords.clear()
                 indexes = previousIndexedFields.associateWith { mutableMapOf() }
                 previousEntries.forEach { (key, values) ->
@@ -375,14 +386,14 @@ private class RekordTable(
     }
 
     /** Applies [change] to every rekord, leaving what they are filed under and indexed by as it is. */
-    fun alter(change: (MutableRekordValues) -> Unit) = alter(idFields, indexedFields, change)
+    fun alter(change: (MutableRekordValues) -> Unit) = alter(idPaths, indexedFields, change)
 
     private fun refile(
-        idFields: List<String>,
+        idPaths: List<List<String>>,
         indexedFields: List<String>,
         entries: List<Pair<RekordKey, MutableRekordValues>>,
     ) {
-        this.idFields = idFields
+        this.idPaths = idPaths
         rekords.clear()
         indexes = indexedFields.associateWith { mutableMapOf() }
         for ((key, values) in entries) {
@@ -508,25 +519,25 @@ private class RekordTable(
      * declared, or the values carry none of them.
      */
     private fun keyOf(values: RekordValues): RekordKey.Ids? {
-        if (idFields.isEmpty()) {
+        if (idPaths.isEmpty()) {
             return null
         }
-        return RekordKey.Ids(idFields.map { fieldName ->
-            if (!values.containsKey(fieldName)) return null
-            values.primitive(fieldName)
+        return RekordKey.Ids(idPaths.map { path ->
+            if (!values.containsPath(path)) return null
+            values.primitiveAt(path)
         })
     }
 
     /**
-     * The key the [pinned] values name, or null when they leave an id field free or hold it to
-     * more than one value.
+     * The key the [pinned] values name, or null when they leave an id free or hold it to more than
+     * one value. Only the rekord's own fields are pinned, so an id holding a rekord leaves it free.
      */
     private fun pinnedKey(pinned: Map<String, List<PrimitiveRekordValue?>>): RekordKey.Ids? {
-        if (idFields.isEmpty()) {
+        if (idPaths.isEmpty()) {
             return null
         }
-        return RekordKey.Ids(idFields.map { fieldName ->
-            val values = pinned[fieldName] ?: return null
+        return RekordKey.Ids(idPaths.map { path ->
+            val values = pinned[path.singleOrNull() ?: return null] ?: return null
             if (values.size != 1) return null
             values.first()
         })

@@ -46,6 +46,39 @@ fun KClass<*>.rekordType(): String = serializer().rekordType()
 inline fun <reified T> idFields(): List<String> =
     allFields<T>().mapNotNull { if (it.field.id) it.field.name else null }
 
+/**
+ * The ids of a rekord with these fields, each as the fields its value is reached through: an id
+ * of its own is the field alone, one holding a rekord is that field followed by each id of the
+ * rekord held, as deep as they nest.
+ */
+@InternalRekordsApi
+fun Collection<FieldWithType>.idPaths(): List<List<String>> =
+    filter { it.field.id }.flatMap { (field, type) ->
+        if (type is RekordKType) {
+            type.allFields().idPaths().map { path -> listOf(field.name) + path }
+        } else {
+            listOf(listOf(field.name))
+        }
+    }
+
+/** Whether these values reach as far as the field at the end of [path]. */
+@InternalRekordsApi
+fun RekordValues.containsPath(path: List<String>): Boolean {
+    val composite: RekordValues = path.dropLast(1).fold(this) { values, fieldName ->
+        (values[fieldName] as? RekordValue.Composite)?.values ?: return false
+    }
+    return composite.containsKey(path.last())
+}
+
+/** The value of the field at the end of [path], or null when it holds none or is not reached. */
+@InternalRekordsApi
+fun RekordValues.primitiveAt(path: List<String>): PrimitiveRekordValue? {
+    val composite: RekordValues = path.dropLast(1).fold(this) { values, fieldName ->
+        (values[fieldName] as? RekordValue.Composite)?.values ?: return null
+    }
+    return (composite[path.last()] as? RekordValue.Primitive)?.value
+}
+
 @InternalRekordsApi
 inline fun <reified T> allFields(): List<FieldWithType> =
     serializer<T>().descriptor.allFields()
@@ -80,14 +113,22 @@ fun RekordListKType.elementAllFields(): List<FieldWithType> = elementDescriptor.
  * The type the field at [index] is stored as: the one it is declared with, or an [EncryptedKType]
  * for a field the declaration has encrypted.
  *
- * @throws IllegalArgumentException when the field is of a type that cannot be stored, or
- * encrypted in a way it cannot be.
+ * @throws IllegalArgumentException when the field is of a type that cannot be stored, is an id
+ * holding a list or a rekord that may be none, or is encrypted in a way it cannot be.
  */
 @InternalRekordsApi
 fun SerialDescriptor.getFieldType(index: Int): KType {
     val plainType: KType = getPlainFieldType(index)
     val field: Field = getElementAnnotations(index).filterIsInstance<Field>().firstOrNull()
         ?: return plainType
+    // A rekord held as an id is told apart by its own ids, so there has to be one, and only one.
+    require(!field.id || plainType !is RekordListKType) {
+        "${field.name} of $serialName holds a list of rekords, which cannot be an id."
+    }
+    require(!field.id || plainType !is RekordKType || !plainType.isMarkedNullable) {
+        "${field.name} of $serialName holds a rekord that may be none, which cannot be an id: " +
+            "make it non-null."
+    }
     if (field.encryption == Encryption.None) return plainType
     require(plainType !is RekordKType && plainType !is RekordListKType) {
         "${field.name} of $serialName holds a rekord, which cannot be encrypted as a whole: " +

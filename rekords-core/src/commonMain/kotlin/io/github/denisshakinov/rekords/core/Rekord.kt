@@ -14,6 +14,9 @@ import kotlin.reflect.KType
 annotation class Rekord(val type: String)
 
 /**
+ * @property id whether the field is part of what tells the rekords of a type apart. A field holding
+ * a rekord can be one, the rekord then telling them apart by its own ids, as long as it cannot be
+ * none; a field holding a list of rekords cannot.
  * @property encryption how the field is encrypted in the storage, which takes a store given a
  * [RekordsCipher]. See [Encryption] for what each way leaves a field to be filtered by.
  */
