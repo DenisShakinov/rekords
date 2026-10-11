@@ -26,6 +26,7 @@ schemas and queries are written once in common code, and every engine supports e
 - Nested rekords and lists of them, stored once and shared between the rekords referring to them,
   and filtered by their fields.
 - Transactions: several operations applied together or not at all.
+- Observing: queries as `Flow`s, read again whenever a transaction writing their rekords commits.
 - Versioned schemas with migrations run in a transaction of their own.
 - Engines found on their own: common code creates the store, each target's dependencies choose the
   storage — SQLite, IndexedDB, or memory for tests and caching. Another engine can be plugged in.
@@ -222,6 +223,36 @@ store.transaction {
     putRekord(newNote)
 }
 ```
+
+### Observing
+
+A query can be observed as a `Flow`: it is read once the flow is collected, and again each time a
+transaction writing its rekords commits:
+
+```kotlin
+val urgent: Flow<List<NoteRekord>> = store.observeRekords<NoteRekord>(
+    filter = Filter.Nested(NoteRekord.TAGS, Filter.Equals(TagRekord.NAME, "urgent")),
+    orderBy = listOf(Order.Ascending(NoteRekord.DUE_DATE)),
+)
+val note: Flow<NoteRekord?> = store.observeRekord<NoteRekord>(Filter.Equals(NoteRekord.ID, 42L))
+val count: Flow<Int> = store.observeCount<NoteRekord>()
+
+// Several rekord types, read in one transaction.
+val summary: Flow<Pair<Int, Int>> = store.observe(NoteRekord::class, TagRekord::class) {
+    count<NoteRekord>() to count<TagRekord>()
+}
+```
+
+- A rekord type is written by putting rekords of it or of a type holding it, and by deleting
+  rekords of it. The rekords a query reads hold others, which are observed along with them:
+  renaming a tag reads the notes holding it again.
+- Transactions committed while a query is being read are read once it is done, by one more read. A
+  transaction that fails writes nothing, and is not seen.
+- What is written is not compared to what is stored, so a write may hand out what was read before.
+  `distinctUntilChanged()` drops it, for rekords that are compared by their values.
+- A query that fails ends the flow with its exception, which `catch` or `retry` handles.
+- Only what this store commits is seen: another store over the same storage, or another process,
+  writes nothing its observers are told of.
 
 ### Encryption
 

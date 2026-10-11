@@ -5,6 +5,7 @@ suspend fun runSamples() {
     storeOperations()
     filters()
     transactions()
+    observing()
     migration()
     encryption()
     engines()

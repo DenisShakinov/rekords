@@ -5,10 +5,16 @@ package io.github.denisshakinov.rekords.core
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.withContext
 import kotlin.concurrent.Volatile
+import kotlin.reflect.KClass
 
 /**
  * Keeps the rekords [schema] declares with [editor].
@@ -36,6 +42,25 @@ class RekordsStore(
 
     @Volatile
     private var initialized = false
+
+    /**
+     * How many transactions writing each rekord type have been committed, which is what an
+     * observer is told to read its rekords again by. A type never written is at none.
+     */
+    private val versions = MutableStateFlow<Map<String, Long>>(emptyMap())
+
+    /** The rekord types each type of [schema] holds, itself included, as deep as they nest. */
+    private val heldRekordTypes: Map<String, Set<String>> by lazy {
+        schema.rekordTypes.associate { rekordClass ->
+            val rekordType = rekordClass.rekordType()
+            rekordType to mutableSetOf<String>().also {
+                collectHeldRekordTypes(rekordType, rekordClass.allFields(), it)
+            }
+        }
+    }
+
+    private fun heldRekordTypes(rekordType: String): Set<String> =
+        heldRekordTypes[rekordType] ?: setOf(rekordType)
 
     private suspend fun ensureInitialized() {
         if (initialized) return
@@ -99,7 +124,12 @@ class RekordsStore(
                 withContext(dispatcher) {
                     ensureInitialized()
                     transactionMutex.withLock {
-                        runOnEditor(editor) { transaction(JoinedAction(action)) }
+                        val writes = Writes()
+                        val result = runOnEditor(editor) { transaction(JoinedAction(action, writes)) }
+                        // Still holding the lock: no transaction reads what this one committed
+                        // before its observers are told to read it.
+                        invalidate(writes)
+                        result
                     }
                 }
             )
@@ -136,6 +166,85 @@ class RekordsStore(
         offset: Int? = null,
     ): Result<List<R>> = transaction {
         getRekords(filter, orderBy, limit, offset)
+    }
+
+    /**
+     * The rekords of [R] that [filter] selects, ordered by [orderBy] and paged by [limit] and
+     * [offset], read again each time a transaction writing them commits - see [observe].
+     */
+    inline fun <reified R> observeRekords(
+        filter: Filter? = null,
+        orderBy: List<Order>? = null,
+        limit: Int? = null,
+        offset: Int? = null,
+    ): Flow<List<R>> = observeRekordTypes(listOf(rekordType<R>())) {
+        getRekords<R>(filter, orderBy, limit, offset)
+    }
+
+    /** The first rekord of [R] that [filter] selects, or null - see [observe]. */
+    inline fun <reified R> observeRekord(filter: Filter): Flow<R?> =
+        observeRekordTypes(listOf(rekordType<R>())) {
+            getRekord<R>(filter)
+        }
+
+    /** The number of rekords of [R] that [filter] selects - see [observe]. */
+    inline fun <reified R> observeCount(filter: Filter? = null): Flow<Int> =
+        observeRekordTypes(listOf(rekordType<R>())) {
+            count<R>(filter)
+        }
+
+    /** The [fields] of the rekords of [R] that [filter] selects, as [query] reads them - see [observe]. */
+    inline fun <reified R> observeQuery(
+        fields: List<String>? = null,
+        filter: Filter? = null,
+        orderBy: List<Order>? = null,
+        limit: Int? = null,
+        offset: Int? = null,
+    ): Flow<List<RekordValues>> = observeRekordTypes(listOf(rekordType<R>())) {
+        query<R>(fields, filter, orderBy, limit, offset)
+    }
+
+    /**
+     * What [action] reads of the rekords of [rekordClasses], read once the flow is collected and
+     * again each time a transaction writing any of them commits.
+     *
+     * - A rekord type is written by putting rekords of it, or of a type holding it, and by deleting
+     *   rekords of it. The types [rekordClasses] hold, as deep as they nest, are observed along
+     *   with them: a rekord is read back with what it holds.
+     * - Only what this store commits is seen. Another store over the same storage, another process,
+     *   writes nothing an observer is told of. A transaction that fails has written nothing.
+     * - Several transactions committed while [action] is running are read once it is done, by one
+     *   run of it. What it reads may be what it read before: a write is not compared to what is
+     *   stored.
+     * - [action] runs as a transaction of its own each time, see [transaction]. Its failure ends
+     *   the flow with the exception it failed with, to be caught with `catch` or `retry`.
+     */
+    fun <T> observe(
+        vararg rekordClasses: KClass<*>,
+        action: suspend RekordsEditor.() -> T,
+    ): Flow<T> = observeRekordTypes(rekordClasses.map { it.rekordType() }, action)
+
+    @PublishedApi
+    internal fun <T> observeRekordTypes(
+        rekordTypes: List<String>,
+        action: suspend RekordsEditor.() -> T,
+    ): Flow<T> {
+        val observedTypes = rekordTypes.flatMapTo(mutableSetOf()) { heldRekordTypes(it) }
+        // The versions are a state, so a collector still running the action last read is handed
+        // the latest of them when done, however many commits went by meanwhile.
+        return versions
+            .map { versions -> observedTypes.map { versions[it] ?: 0L } }
+            .distinctUntilChanged()
+            .map { transaction(action).getOrThrow() }
+    }
+
+    /** Tells the observers of what [writes] wrote to read their rekords again. */
+    private fun invalidate(writes: Writes) {
+        val written = writes.put.flatMapTo(writes.deleted) { heldRekordTypes(it) }
+        if (written.isEmpty()) return
+        versions.update { versions ->
+            versions + written.associateWith { (versions[it] ?: 0L) + 1 }
+        }
     }
 
     /**
@@ -183,12 +292,47 @@ fun <C : RekordsEngineConfig> RekordsStore(
     block: C.() -> Unit = {},
 ): RekordsStore = RekordsStore(schema, engine.create(block), dispatcher, cipher)
 
+/** Adds to [into] [rekordType] and the rekord types its [fields] hold, as deep as they nest. */
+private fun collectHeldRekordTypes(
+    rekordType: String,
+    fields: List<FieldWithType>,
+    into: MutableSet<String>,
+) {
+    if (!into.add(rekordType)) return
+    for (field in fields) {
+        when (val type = field.type) {
+            is RekordKType -> collectHeldRekordTypes(type.rekordType(), type.allFields(), into)
+            is RekordListKType ->
+                collectHeldRekordTypes(type.elementRekordType(), type.elementAllFields(), into)
+        }
+    }
+}
+
+/** The rekord types a transaction has put rekords of, and deleted rekords of. */
+private class Writes {
+    val put: MutableSet<String> = mutableSetOf()
+    val deleted: MutableSet<String> = mutableSetOf()
+}
+
 /**
- * The editor a transaction's action is handed. A transaction started on it runs within the one
- * already running, so no editor is ever asked to nest one - each would otherwise nest them in a way
- * of its own, if at all.
+ * The editor a transaction's action is handed, keeping [writes]. A transaction started on it runs
+ * within the one already running, so no editor is ever asked to nest one - each would otherwise
+ * nest them in a way of its own, if at all.
  */
-private class JoinedTransactionEditor(editor: RekordsEditor) : RekordsEditor by editor {
+private class JoinedTransactionEditor(
+    private val editor: RekordsEditor,
+    private val writes: Writes,
+) : RekordsEditor by editor {
+
+    override suspend fun put(rekordType: String, values: RekordValues, filter: Filter?) {
+        writes.put += rekordType
+        runOnEditor(editor) { put(rekordType, values, filter) }
+    }
+
+    override suspend fun delete(rekordType: String, filter: Filter?) {
+        writes.deleted += rekordType
+        runOnEditor(editor) { delete(rekordType, filter) }
+    }
 
     override suspend fun <T> transaction(action: suspend RekordsEditor.() -> T): T =
         runOnEditor(this, action)
@@ -199,13 +343,17 @@ private class JoinedTransactionEditor(editor: RekordsEditor) : RekordsEditor by 
  * runs to its own operations, and handing another editor over to what they run is not one of them.
  */
 
-/** Runs [action] on the editor a transaction hands it, joining any nested one to it. */
+/**
+ * Runs [action] on the editor a transaction hands it, joining any nested one to it, and keeps in
+ * [writes] what it writes.
+ */
 private class JoinedAction<T>(
     private val action: suspend RekordsEditor.() -> T,
+    private val writes: Writes,
 ) : suspend (RekordsEditor) -> T {
 
     override suspend fun invoke(editor: RekordsEditor): T =
-        runOnEditor(JoinedTransactionEditor(editor), action)
+        runOnEditor(JoinedTransactionEditor(editor, writes), action)
 }
 
 /** Creates or upgrades the schema of the storage on the editor a transaction hands it. */

@@ -21,7 +21,8 @@ kotlin {
     }
     sourceSets {
         commonMain.dependencies {
-            implementation(libs.kotlinx.coroutines.core)
+            // Api: the store hands out flows, and takes a dispatcher.
+            api(libs.kotlinx.coroutines.core)
             implementation(libs.kotlinx.datetime)
             api(libs.kotlinx.serialization.core)
         }

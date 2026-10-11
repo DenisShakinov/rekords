@@ -9,3 +9,9 @@ local.properties
 captures
 .externalNativeBuild
 .cxx
+
+# SQLite databases the samples and tests leave behind, with their journals.
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
