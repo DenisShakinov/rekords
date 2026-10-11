@@ -14,11 +14,31 @@ import kotlin.reflect.KType
 annotation class Rekord(val type: String)
 
 /**
+ * A group of fields kept within each rekord holding it rather than as a rekord of its own: it has
+ * no type of its own, is not declared in a schema, and nothing is stored for it but its fields -
+ * as fields of the rekord holding it, named as [Field.prefixed] tells.
+ *
+ * Its fields are what a storage sees, so they are filtered and ordered by those names. A filter
+ * can look into it as into a rekord held, too: [Filter.Nested] on the field holding it selects by
+ * its fields. A field holding one that is an id makes each of its fields an id.
+ *
+ * It may hold values, rekords and other embedded classes, but no list. A field holding one may be
+ * none - each of its fields then holding none - unless it is an id; the class has to have a field
+ * that cannot be null then, or none would not be told from all of its fields holding none.
+ */
+@MetaSerializable
+@Target(AnnotationTarget.CLASS)
+annotation class Embedded
+
+/**
  * @property id whether the field is part of what tells the rekords of a type apart. A field holding
  * a rekord can be one, the rekord then telling them apart by its own ids, as long as it cannot be
  * none; a field holding a list of rekords cannot.
  * @property encryption how the field is encrypted in the storage, which takes a store given a
  * [RekordsCipher]. See [Encryption] for what each way leaves a field to be filtered by.
+ * @property prefixed for a field holding an [Embedded] class: whether the fields of the class are
+ * named after this one - `game` holding `id` keeping it as `game_id` - or by their own names alone.
+ * A field holding anything else is not affected by it.
  */
 @SerialInfo
 @Target(AnnotationTarget.PROPERTY)
@@ -27,6 +47,7 @@ annotation class Field(
     val id: Boolean = false,
     val searchable: Boolean = false,
     val encryption: Encryption = Encryption.None,
+    val prefixed: Boolean = true,
 )
 
 /**

@@ -326,13 +326,36 @@ private class JoinedTransactionEditor(
 
     override suspend fun put(rekordType: String, values: RekordValues, filter: Filter?) {
         writes.put += rekordType
-        runOnEditor(editor) { put(rekordType, values, filter) }
+        val flatFilter = filter?.flattened(rekordType)
+        runOnEditor(editor) { put(rekordType, values, flatFilter) }
     }
 
     override suspend fun delete(rekordType: String, filter: Filter?) {
         writes.deleted += rekordType
-        runOnEditor(editor) { delete(rekordType, filter) }
+        val flatFilter = filter?.flattened(rekordType)
+        runOnEditor(editor) { delete(rekordType, flatFilter) }
     }
+
+    override suspend fun query(
+        rekordType: String,
+        fields: List<String>?,
+        filter: Filter?,
+        orderBy: List<Order>?,
+        limit: Int?,
+        offset: Int?,
+    ): List<RekordValues> {
+        val flatFilter = filter?.flattened(rekordType)
+        return runOnEditor(editor) { query(rekordType, fields, flatFilter, orderBy, limit, offset) }
+    }
+
+    override suspend fun count(rekordType: String, filter: Filter?): Int {
+        val flatFilter = filter?.flattened(rekordType)
+        return runOnEditor(editor) { count(rekordType, flatFilter) }
+    }
+
+    /** See [Embedded]: a storage is asked about the fields of an embedded class as the rekord's. */
+    private fun Filter.flattened(rekordType: String): Filter =
+        if (editor.schemaEditor.hasSchema) flattened(rekordType, editor.schemaEditor.schema) else this
 
     override suspend fun <T> transaction(action: suspend RekordsEditor.() -> T): T =
         runOnEditor(this, action)

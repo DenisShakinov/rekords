@@ -24,7 +24,8 @@ schemas and queries are written once in common code, and every engine supports e
 - Plain Kotlin classes, mapped by `kotlinx.serialization` — no code generation step.
 - Filters, ordering, paging and counting.
 - Nested rekords and lists of them, stored once and shared between the rekords referring to them,
-  and filtered by their fields.
+  and filtered by their fields — a nested rekord can be an id too.
+- Embedded classes: a group of fields reused by several rekord types, kept within each of them.
 - Transactions: several operations applied together or not at all.
 - Observing: queries as `Flow`s, read again whenever a transaction writing their rekords commits.
 - Versioned schemas with migrations run in a transaction of their own.
@@ -128,7 +129,52 @@ class NoteRekord(
 ```
 
 A field holds a `String`, `Int`, `Long`, `Float`, `Double`, `Boolean`, a `kotlinx.datetime`
-`LocalDate` or `LocalDateTime`, another rekord or a list of them — nullable or not.
+`LocalDate` or `LocalDateTime`, another rekord or a list of them — nullable or not — or an embedded
+class.
+
+A rekord held can be an id, as long as it cannot be null: the rekord is then told apart by the ids
+of the one it holds. A list cannot be an id.
+
+```kotlin
+@Rekord(type = "session")
+class SessionRekord(
+    @Field(name = GAME_ID, id = true)
+    val gameId: Long,
+    // One session per game and platform.
+    @Field(name = PLATFORM, id = true)
+    val platform: PlatformRekord,
+)
+```
+
+An `@Embedded` class is a group of fields with no type, no table and no place in the schema of its
+own: its fields are kept as fields of each rekord holding it, named after the field holding it —
+`game` holding `id` keeps it as `game_id` — or, with `prefixed = false`, by their own names. A field
+holding one that is an id makes each of its fields an id.
+
+```kotlin
+@Embedded
+class GameKey(
+    @Field(name = "id") val id: String,
+    @Field(name = "id_type") val idType: String,
+)
+
+@Rekord(type = "game")
+class GameRekord(
+    @Field(name = "key", id = true, prefixed = false) val key: GameKey, // id, id_type
+    @Field(name = "title") val title: String,
+)
+
+@Rekord(type = "play")
+class PlayRekord(
+    @Field(name = "game", id = true) val game: GameKey, // game_id, game_id_type
+    @Field(name = "hours") val hours: Int,
+)
+```
+
+Its fields are filtered and ordered by the names they are kept under, or through `Filter.Nested` on
+the field holding it, as a rekord held is. An embedded class holds values, rekords and other
+embedded classes, but no list. A field holding one may be null unless it is an id, the class then
+needing a field that cannot be: null is kept as each of its fields holding none.
 
 ### Schema
 

@@ -83,13 +83,94 @@ fun RekordValues.primitiveAt(path: List<String>): PrimitiveRekordValue? {
 inline fun <reified T> allFields(): List<FieldWithType> =
     serializer<T>().descriptor.allFields()
 
+/**
+ * The fields a rekord of this descriptor is stored as. A field holding an [Embedded] class is not
+ * one of them: the fields of the class are, in its place - see [embeddedFields].
+ */
 @InternalRekordsApi
 fun SerialDescriptor.allFields(): List<FieldWithType> {
     val fields = mutableListOf<FieldWithType>()
     for (i in 0..<elementsCount) {
-        fields.add(getField(i) to getFieldType(i))
+        if (getElementDescriptor(i).isEmbedded()) {
+            fields.addAll(embeddedFields(i))
+        } else {
+            fields.add(getField(i) to getFieldType(i))
+        }
     }
     return fields
+}
+
+/** Whether this is the descriptor of an [Embedded] class, nullable or not. */
+internal fun SerialDescriptor.isEmbedded(): Boolean = annotations.any { it is Embedded }
+
+/** What the names of the fields of the embedded class this field holds begin with. */
+internal fun Field.embeddedPrefix(): String = if (prefixed) "${name}_" else ""
+
+/**
+ * The fields the embedded class held by the field at [index] is stored as, as fields of this
+ * rekord: named as [Field.prefixed] tells, ids when the field holding them is one, and nullable
+ * when it is.
+ *
+ * @throws IllegalArgumentException when the class cannot be embedded the way the field holds it.
+ */
+private fun SerialDescriptor.embeddedFields(index: Int): List<FieldWithType> {
+    val field: Field = getField(index)
+    val embedded: SerialDescriptor = getElementDescriptor(index)
+    val isNullable: Boolean = embedded.isNullable
+    require(field.encryption == Encryption.None) {
+        "${field.name} of $serialName holds an embedded class, which cannot be encrypted as a " +
+            "whole: encrypt the fields of the class instead."
+    }
+    require(!field.id || !isNullable) {
+        "${field.name} of $serialName holds an embedded class that may be none, which cannot be " +
+            "an id: make it non-null."
+    }
+    val fields: List<FieldWithType> = embedded.allFields()
+    require(fields.none { it.type is RekordListKType }) {
+        "${field.name} of $serialName holds an embedded class holding a list, which it cannot: " +
+            "the list would need a table of its own."
+    }
+    require(!isNullable || fields.any { !it.type.isMarkedNullable }) {
+        "${field.name} of $serialName holds an embedded class that may be none, none of the " +
+            "fields of which cannot be null: none of it would not be told from all of them " +
+            "holding none. Give the class a field that cannot be null, or make the field non-null."
+    }
+    val prefix: String = field.embeddedPrefix()
+    return fields.map { (innerField, innerType) ->
+        val embeddedField = Field(
+            name = prefix + innerField.name,
+            id = field.id,
+            searchable = field.searchable || innerField.searchable,
+            encryption = innerField.encryption,
+        )
+        require(!embeddedField.id || innerType !is RekordKType || !innerType.isMarkedNullable) {
+            "${innerField.name} of ${embedded.serialName} holds a rekord that may be none, which " +
+                "cannot be an id, as ${field.name} of $serialName makes it: make it non-null."
+        }
+        require(innerField.encryption != Encryption.Randomized || (!embeddedField.id && !embeddedField.searchable)) {
+            "${innerField.name} of ${embedded.serialName} is encrypted Randomized, which no rekord " +
+                "can be selected by, so it can be neither an id nor searchable, as ${field.name} " +
+                "of $serialName makes it. Encrypt it Deterministic instead."
+        }
+        embeddedField to if (isNullable) innerType.nullable() else innerType
+    }
+}
+
+/** This type, holding none as well. */
+private fun KType.nullable(): KType = when {
+    isMarkedNullable -> this
+    this is RekordKType -> RekordKType(descriptor, isMarkedNullable = true)
+    this is RekordListKType -> RekordListKType(elementDescriptor, isMarkedNullable = true)
+    this is EncryptedKType -> EncryptedKType(plainType.nullable(), encryption)
+    else -> when (classifier) {
+        Int::class -> typeOf<Int?>()
+        Long::class -> typeOf<Long?>()
+        Float::class -> typeOf<Float?>()
+        Double::class -> typeOf<Double?>()
+        Boolean::class -> typeOf<Boolean?>()
+        String::class -> typeOf<String?>()
+        else -> throw IllegalArgumentException("Unsupported type: $this")
+    }
 }
 
 @OptIn(InternalSerializationApi::class)
@@ -228,16 +309,24 @@ private fun String.isClass(clazz: KClass<*>): Boolean {
     return endsWith(clazz.simpleName.orEmpty()) || endsWith("${clazz.simpleName}?")
 }
 
+/**
+ * Encodes a rekord into [values], each field under [prefix] and its name: an embedded class is
+ * encoded into the very values of the rekord holding it, under the prefix of the field holding it.
+ */
 @OptIn(ExperimentalSerializationApi::class)
 internal class RekordValuesEncoder(
+    internal val values: MutableRekordValues = mutableMapOf(),
+    private val prefix: String = "",
     private val onComplete: ((MutableRekordValues) -> Unit)? = null,
 ) : AbstractEncoder() {
-    internal val values: MutableRekordValues = mutableMapOf()
 
     private var elementIndex = 0
     private var elementName = ""
     private lateinit var descriptor: SerialDescriptor
     private var isCompositeField = false
+
+    /** The field holding the embedded class being encoded, if one is. */
+    private var embeddedField: Field? = null
 
     override val serializersModule: SerializersModule = EmptySerializersModule()
 
@@ -247,14 +336,27 @@ internal class RekordValuesEncoder(
         val fieldAnnotation =
             descriptor.getElementAnnotations(index).filterIsInstance<Field>().firstOrNull()
                 ?: return false
-        elementName = fieldAnnotation.name
-        val kind = descriptor.getElementDescriptor(index).kind
+        elementName = prefix + fieldAnnotation.name
+        val elementDescriptor = descriptor.getElementDescriptor(index)
+        if (elementDescriptor.isEmbedded()) {
+            // Each of its fields holds none until it is written, which one that is none never is.
+            descriptor.embeddedFields(index).forEach { (field, _) -> values[prefix + field.name] = null }
+            embeddedField = fieldAnnotation
+            isCompositeField = false
+            return true
+        }
+        embeddedField = null
+        val kind = elementDescriptor.kind
         isCompositeField = kind == StructureKind.CLASS || kind == StructureKind.LIST
         if (!isCompositeField) values[elementName] = null
         return true
     }
 
     override fun beginStructure(descriptor: SerialDescriptor): CompositeEncoder {
+        embeddedField?.let { field ->
+            embeddedField = null
+            return RekordValuesEncoder(values = values, prefix = prefix + field.embeddedPrefix())
+        }
         if (!isCompositeField) return this
         isCompositeField = false
         val name = elementName
@@ -279,8 +381,13 @@ internal class RekordValuesEncoder(
      * left out of the values would be taken for one not written, and keep what it held before.
      */
     override fun encodeNull() {
-        values[elementName] = null
         isCompositeField = false
+        // An embedded class that is none leaves each of its fields holding none, as they are.
+        if (embeddedField != null) {
+            embeddedField = null
+            return
+        }
+        values[elementName] = null
     }
 
     override fun encodeValue(value: Any) {
@@ -324,10 +431,19 @@ private class RekordValuesCollectionEncoder(
     }
 }
 
+/**
+ * Decodes a rekord from [values], each field read under [prefix] and its name: an embedded class
+ * is decoded from the very values of the rekord holding it, under the prefix of the field holding it.
+ */
 @OptIn(ExperimentalSerializationApi::class)
-internal class RekordValuesDecoder(private val values: RekordValues) : AbstractDecoder() {
+internal class RekordValuesDecoder(
+    private val values: RekordValues,
+    private val prefix: String = "",
+) : AbstractDecoder() {
     private var elementIndex = 0
     private var elementName = ""
+    private var descriptor: SerialDescriptor? = null
+    private var fieldIndex = 0
 
     override val serializersModule: SerializersModule = EmptySerializersModule()
 
@@ -339,20 +455,31 @@ internal class RekordValuesDecoder(private val values: RekordValues) : AbstractD
         }
     }
 
-    override fun decodeNotNullMark(): Boolean = values[elementName] != null
+    override fun decodeNotNullMark(): Boolean {
+        val descriptor: SerialDescriptor = descriptor ?: return values[elementName] != null
+        if (!descriptor.getElementDescriptor(fieldIndex).isEmbedded()) return values[elementName] != null
+        // An embedded class is none when each of its fields holds none.
+        return descriptor.embeddedFields(fieldIndex).any { (field, _) -> values[prefix + field.name] != null }
+    }
 
     override fun decodeElementIndex(descriptor: SerialDescriptor): Int {
         while (elementIndex < descriptor.elementsCount) {
             val index = elementIndex++
             val fieldAnnotation = descriptor.getElementAnnotations(index)
                 .filterIsInstance<Field>().firstOrNull() ?: continue
-            elementName = fieldAnnotation.name
+            elementName = prefix + fieldAnnotation.name
+            this.descriptor = descriptor
+            fieldIndex = index
             return index
         }
         return CompositeDecoder.DECODE_DONE
     }
 
     override fun beginStructure(descriptor: SerialDescriptor): CompositeDecoder {
+        if (descriptor.isEmbedded()) {
+            val field: Field = checkNotNull(this.descriptor).getField(fieldIndex)
+            return RekordValuesDecoder(values, prefix + field.embeddedPrefix())
+        }
         return when (val v = values[elementName]) {
             is RekordValue.Composite -> RekordValuesDecoder(v.values)
             is RekordValue.CompositeList -> RekordValuesCollectionDecoder(v.list)
@@ -390,17 +517,29 @@ inline fun <reified T> encode(rekord: T): RekordValues = encode(rekord, serializ
 
 @InternalRekordsApi
 fun <T> RekordValues.decode(deserializer: DeserializationStrategy<T>): T {
-    val descriptor: SerialDescriptor = deserializer.descriptor
     val mutableValues: MutableRekordValues = this.toMutableMap()
+    mutableValues.coerce(deserializer.descriptor, prefix = "")
+    return RekordValuesDecoder(mutableValues).decodeSerializableValue(deserializer)
+}
+
+/**
+ * Turns each number these values hold for a field of [descriptor] - named under [prefix] - into
+ * the type the field is declared with, the fields of an embedded class included.
+ */
+private fun MutableRekordValues.coerce(descriptor: SerialDescriptor, prefix: String) {
     for (elementIndex in 0..<descriptor.elementsCount) {
         val fieldAnnotation = descriptor.getElementAnnotations(elementIndex)
             .filterIsInstance<Field>().firstOrNull() ?: continue
-        val elementName = fieldAnnotation.name
+        val elementDescriptor: SerialDescriptor = descriptor.getElementDescriptor(elementIndex)
+        if (elementDescriptor.isEmbedded()) {
+            coerce(elementDescriptor, prefix + fieldAnnotation.embeddedPrefix())
+            continue
+        }
+        val elementName = prefix + fieldAnnotation.name
         val value: RekordValue? = this[elementName]
         if (value !is RekordValue.Primitive) continue
         val primitive = value.value
         if (primitive !is Number) continue
-        val elementDescriptor: SerialDescriptor = descriptor.getElementDescriptor(elementIndex)
         val serialName: String = elementDescriptor.serialName
         val coerced: PrimitiveRekordValue = when {
             serialName.isClass(LocalDate::class) -> primitive.toLong().toLocalDate().toString()
@@ -411,9 +550,8 @@ fun <T> RekordValues.decode(deserializer: DeserializationStrategy<T>): T {
             serialName.isClass(Boolean::class) -> primitive == 1 || primitive == 1L
             else -> continue
         }
-        mutableValues[elementName] = RekordValue.Primitive(coerced)
+        this[elementName] = RekordValue.Primitive(coerced)
     }
-    return RekordValuesDecoder(mutableValues).decodeSerializableValue(deserializer)
 }
 
 @InternalRekordsApi
