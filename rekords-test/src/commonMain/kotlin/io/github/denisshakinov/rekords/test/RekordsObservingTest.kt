@@ -14,6 +14,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.produceIn
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.runTest
+import kotlinx.datetime.LocalDate
 import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 
@@ -30,7 +31,7 @@ abstract class RekordsObservingTest(private val rekordsEditor: RekordsEditor) {
     private val rekordsStore = RekordsStore(TestShelfRekordsSchema(), rekordsEditor)
 
     private val france = TestCountryRekord(code = "fr", name = "France")
-    private val dumas = TestAuthorRekord(id = 1, penName = "Dumas", country = france)
+    private val dumas = TestAuthorRekord(id = 1, penName = "Dumas", country = france, born = LocalDate(1802, 7, 24))
     private val musketeers = TestBookRekord(id = 10, title = "The Three Musketeers", author = dumas, coauthors = emptyList())
     private val monteCristo = TestBookRekord(id = 11, title = "Monte Cristo", author = dumas, coauthors = emptyList())
 

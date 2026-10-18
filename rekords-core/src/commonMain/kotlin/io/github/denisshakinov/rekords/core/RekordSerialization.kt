@@ -524,7 +524,8 @@ fun <T> RekordValues.decode(deserializer: DeserializationStrategy<T>): T {
 
 /**
  * Turns each number these values hold for a field of [descriptor] - named under [prefix] - into
- * the type the field is declared with, the fields of an embedded class included.
+ * the type the field is declared with: the fields of an embedded class included, and those of the
+ * rekords held, as deep as they nest, which an engine reads back as stored as well.
  */
 private fun MutableRekordValues.coerce(descriptor: SerialDescriptor, prefix: String) {
     for (elementIndex in 0..<descriptor.elementsCount) {
@@ -536,21 +537,35 @@ private fun MutableRekordValues.coerce(descriptor: SerialDescriptor, prefix: Str
             continue
         }
         val elementName = prefix + fieldAnnotation.name
-        val value: RekordValue? = this[elementName]
-        if (value !is RekordValue.Primitive) continue
-        val primitive = value.value
-        if (primitive !is Number) continue
-        val serialName: String = elementDescriptor.serialName
-        val coerced: PrimitiveRekordValue = when {
-            serialName.isClass(LocalDate::class) -> primitive.toLong().toLocalDate().toString()
-            serialName.isClass(LocalDateTime::class) ->
-                primitive.toLong().toLocalDateTime().toString()
-            serialName.isClass(Int::class) -> primitive.toInt()
-            serialName.isClass(Float::class) -> primitive.toFloat()
-            serialName.isClass(Boolean::class) -> primitive == 1 || primitive == 1L
-            else -> continue
+        when (val value: RekordValue? = this[elementName]) {
+            is RekordValue.Composite -> this[elementName] = value.coerced(elementDescriptor)
+            is RekordValue.CompositeList -> this[elementName] = RekordValue.CompositeList(
+                value.list.map { it.coerced(elementDescriptor.getElementDescriptor(0)) },
+            )
+            is RekordValue.Primitive -> {
+                val coerced: PrimitiveRekordValue =
+                    value.value.coercedTo(elementDescriptor.serialName) ?: continue
+                this[elementName] = RekordValue.Primitive(coerced)
+            }
+            null -> continue
         }
-        this[elementName] = RekordValue.Primitive(coerced)
+    }
+}
+
+/** This rekord held, with its numbers turned into the types of the fields of [descriptor]. */
+private fun RekordValue.Composite.coerced(descriptor: SerialDescriptor): RekordValue.Composite =
+    RekordValue.Composite(rekordType, values.toMutableMap().apply { coerce(descriptor, prefix = "") })
+
+/** This value turned into the type of [serialName], or null for one that needs no turning. */
+private fun PrimitiveRekordValue.coercedTo(serialName: String): PrimitiveRekordValue? {
+    if (this !is Number) return null
+    return when {
+        serialName.isClass(LocalDate::class) -> toLong().toLocalDate().toString()
+        serialName.isClass(LocalDateTime::class) -> toLong().toLocalDateTime().toString()
+        serialName.isClass(Int::class) -> toInt()
+        serialName.isClass(Float::class) -> toFloat()
+        serialName.isClass(Boolean::class) -> this == 1 || this == 1L
+        else -> null
     }
 }
 

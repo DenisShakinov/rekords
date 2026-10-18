@@ -4,6 +4,7 @@ import io.github.denisshakinov.rekords.core.Field
 import io.github.denisshakinov.rekords.core.Rekord
 import io.github.denisshakinov.rekords.core.RekordsMigrationEditor
 import io.github.denisshakinov.rekords.core.RekordsSchema
+import kotlinx.datetime.LocalDate
 import kotlin.reflect.KClass
 
 /**
@@ -54,7 +55,10 @@ data class TestBookRekord(
     }
 }
 
-/** Identified by two fields, so that what refers to it is made of both. */
+/**
+ * Identified by two fields, so that what refers to it is made of both, and holding a date, which a
+ * rekord nesting it is to read back as the date it is rather than as the number it is stored as.
+ */
 @Rekord(type = "nest_author")
 data class TestAuthorRekord(
     @Field(name = ID, id = true)
@@ -63,11 +67,14 @@ data class TestAuthorRekord(
     val penName: String,
     @Field(name = COUNTRY)
     val country: TestCountryRekord?,
+    @Field(name = BORN)
+    val born: LocalDate?,
 ) {
     companion object {
         const val ID = "id"
         const val PEN_NAME = "pen_name"
         const val COUNTRY = "country"
+        const val BORN = "born"
     }
 }
 

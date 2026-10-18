@@ -7,6 +7,7 @@ import io.github.denisshakinov.rekords.core.RekordsStore
 import io.github.denisshakinov.rekords.core.or
 import io.github.denisshakinov.rekords.core.plus
 import kotlinx.coroutines.test.runTest
+import kotlinx.datetime.LocalDate
 import kotlin.test.assertEquals
 
 /**
@@ -21,10 +22,10 @@ abstract class RekordsNestingTest(private val rekordsEditor: RekordsEditor) {
     private val france = TestCountryRekord(code = "fr", name = "France")
     private val japan = TestCountryRekord(code = "jp", name = "Japan")
 
-    private val dumas = TestAuthorRekord(id = 1, penName = "Dumas", country = france)
-    private val maquet = TestAuthorRekord(id = 2, penName = "Maquet", country = france)
-    private val murakami = TestAuthorRekord(id = 3, penName = "Murakami", country = japan)
-    private val anonymous = TestAuthorRekord(id = 4, penName = "Anonymous", country = null)
+    private val dumas = TestAuthorRekord(id = 1, penName = "Dumas", country = france, born = LocalDate(1802, 7, 24))
+    private val maquet = TestAuthorRekord(id = 2, penName = "Maquet", country = france, born = LocalDate(1813, 9, 13))
+    private val murakami = TestAuthorRekord(id = 3, penName = "Murakami", country = japan, born = LocalDate(1949, 1, 12))
+    private val anonymous = TestAuthorRekord(id = 4, penName = "Anonymous", country = null, born = null)
 
     private val musketeers = TestBookRekord(id = 10, title = "The Three Musketeers", author = dumas, coauthors = listOf(maquet))
     private val monteCristo = TestBookRekord(id = 11, title = "Monte Cristo", author = dumas, coauthors = listOf(maquet, anonymous))
