@@ -713,6 +713,65 @@ abstract class RekordsEditorTest(private val rekordsEditor: RekordsEditor) {
         assertEquals(expected = listOf("Doom"), actual = titles(Filter.Contains(TestGameRekord.TITLE, "")))
     }
 
+    /**
+     * Ignoring case, `A`-`Z` alone is folded, the way SQLite folds it without ICU - an engine
+     * folding more, an in-memory one by [String.lowercase] or a SQLite built with ICU, would select
+     * rekords the others do not.
+     */
+    open fun check_filter_contains_ignoring_case() = test {
+        suspend fun titles(filter: Filter): List<String> = rekordsStore
+            .getRekords<TestGameRekord>(filter, orderBy = listOf(Order.Ascending(TestGameRekord.ID)))
+            .getOrThrow()
+            .map { it.title }
+
+        assertEquals(
+            expected = listOf("Doom", "Doom 2"),
+            actual = titles(Filter.Contains(TestGameRekord.TITLE, "doom", ignoreCase = true)),
+        )
+        assertEquals(
+            expected = listOf("Silent Hill 2"),
+            actual = titles(Filter.Contains(TestGameRekord.TITLE, "sILENT hILL 2", ignoreCase = true)),
+        )
+        assertEquals(
+            expected = listOf("Silent Hill", "Silent Hill 2", "Silent Hill 3"),
+            actual = titles(Filter.Not(Filter.Contains(TestGameRekord.TITLE, "DOOM", ignoreCase = true))),
+        )
+        assertEquals(
+            expected = 3,
+            actual = rekordsStore
+                .count<TestGameRekord>(Filter.Contains(TestGameRekord.TITLE, "HILL", ignoreCase = true))
+                .getOrThrow(),
+        )
+
+        rekordsStore.putRekord(
+            TestGameRekord(
+                id = 6,
+                title = "Дум ÉPOQUE 100%",
+                releaseDate = LocalDate(1993, 12, 10),
+                state = TestGameStateRekord(id = 2, name = "Playing"),
+                properties = emptyList(),
+            ),
+        )
+        // A letter outside A-Z keeps its case.
+        assertEquals(expected = emptyList(), actual = titles(Filter.Contains(TestGameRekord.TITLE, "дум", ignoreCase = true)))
+        assertEquals(expected = emptyList(), actual = titles(Filter.Contains(TestGameRekord.TITLE, "époque", ignoreCase = true)))
+        assertEquals(
+            expected = listOf("Дум ÉPOQUE 100%"),
+            actual = titles(Filter.Contains(TestGameRekord.TITLE, "Дум Époque", ignoreCase = true)),
+        )
+        // A % is still looked for as itself.
+        assertEquals(
+            expected = listOf("Дум ÉPOQUE 100%"),
+            actual = titles(Filter.Contains(TestGameRekord.TITLE, "0%", ignoreCase = true)),
+        )
+
+        rekordsStore.delete<TestGameRekord>(Filter.Contains(TestGameRekord.TITLE, "silent", ignoreCase = true))
+        assertEquals(
+            expected = listOf("Doom", "Doom 2", "Дум ÉPOQUE 100%"),
+            actual = titles(Filter.Contains(TestGameRekord.TITLE, "")),
+        )
+    }
+
     open fun check_composite_delete_parent_does_not_affect_shared_state() = test {
         // Doom (id=1) and Doom 2 (id=2) share state id=3
         rekordsStore.delete<TestGameRekord>(filter = Filter.Equals(TestGameRekord.ID, 1))

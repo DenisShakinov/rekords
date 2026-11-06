@@ -32,9 +32,15 @@ sealed interface Filter {
         /**
          * Selects the rekords whose [field] holds [value] as a part of its text. Every character is
          * looked for as itself - `%` and `_` included - and an empty value is a part of any text.
-         * A field holding no text is looked into as the text of its value. Case counts.
+         * A field holding no text is looked into as the text of its value.
+         *
+         * Case counts unless [ignoreCase] is set, and then for the Latin letters `A`-`Z` alone:
+         * SQLite tells no other letter's case without ICU, which neither the SQLite bundled with
+         * `androidx.sqlite` nor the one Apple platforms ship is built with, so no engine does -
+         * `"doom"` finds `"Doom"`, while `"дум"` does not find `"Дум"`.
          */
-        fun Contains(field: String, value: String) = FieldFilter.Contains(field, value)
+        fun Contains(field: String, value: String, ignoreCase: Boolean = false) =
+            FieldFilter.Contains(field, value, ignoreCase)
 
         /**
          * Selects the rekords whose [field] matches [pattern] the way SQLite's `GLOB` matches it,
@@ -70,9 +76,11 @@ sealed class FieldFilter(open val field: String) : Filter {
         val list: List<PrimitiveRekordValue?>
     ) : FieldFilter(field)
 
+    /** See [Filter.Contains]. */
     data class Contains internal constructor(
         override val field: String,
-        val value: String
+        val value: String,
+        val ignoreCase: Boolean = false,
     ) : FieldFilter(field)
 
     /** See [Filter.Glob]. */

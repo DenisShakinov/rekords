@@ -64,10 +64,12 @@ internal class SQLConditionBuilder(
         is Filter.Not -> "(NOT COALESCE(${condition(filter.filter, rekordType, alias, args)}, 0))"
         is FieldFilter.Nested -> nested(filter, rekordType, alias, args)
         is FieldFilter.InList -> inList(alias, filter, args)
-        // instr rather than LIKE: case counts, and a % or _ is looked for as itself.
+        // instr rather than LIKE: case counts, and a % or _ is looked for as itself. Ignoring case,
+        // both sides are lowered - which lower does for A-Z alone, the in-memory match alike.
         is FieldFilter.Contains -> {
             args += filter.value
-            "(instr(${column(alias, filter.field)}, ?) > 0)"
+            val column = column(alias, filter.field)
+            if (filter.ignoreCase) "(instr(lower($column), lower(?)) > 0)" else "(instr($column, ?) > 0)"
         }
         is FieldFilter.Glob -> {
             args += filter.pattern

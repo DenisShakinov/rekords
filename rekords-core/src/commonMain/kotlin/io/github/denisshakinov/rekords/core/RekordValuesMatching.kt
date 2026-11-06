@@ -36,7 +36,13 @@ fun RekordValues.matches(filter: Filter): Boolean {
         is FieldValueFilter.GreaterThanOrEquals -> compared(filter) { it >= 0 }
         is FieldFilter.InList -> filter.list.contains((this[filter.field] as? RekordValue.Primitive)?.value)
         is FieldFilter.Contains -> (this[filter.field] as? RekordValue.Primitive)?.value?.toString()
-            ?.contains(filter.value) == true
+            ?.let { text ->
+                if (filter.ignoreCase) {
+                    text.asciiLowercase().contains(filter.value.asciiLowercase())
+                } else {
+                    text.contains(filter.value)
+                }
+            } == true
         is FieldFilter.Glob -> (this[filter.field] as? RekordValue.Primitive)?.value?.toString()
             ?.matchesGlob(filter.pattern) == true
         is FieldFilter.Nested -> when (val composite = this[filter.field]) {
@@ -60,6 +66,15 @@ private inline fun RekordValues.compared(filter: FieldValueFilter, holds: (Int) 
     val other = filter.value ?: return false
     return holds(value.compareTo(other.asRekordValue()))
 }
+
+/**
+ * This text with the Latin letters `A`-`Z` lowered and every other character left as it is - what
+ * SQLite's `lower` does without ICU, which [String.lowercase] would outdo.
+ */
+private fun String.asciiLowercase(): String =
+    buildString(length) {
+        for (char in this@asciiLowercase) append(if (char in 'A'..'Z') char + ('a' - 'A') else char)
+    }
 
 /** How the rekords [RekordValues] hold and [other] holds are ordered by [orderBy]. */
 @InternalRekordsApi

@@ -268,6 +268,10 @@ both:
 Filter.Glob(NoteRekord.TITLE, "Draft [0-9]*")
 ```
 
+`Filter.Contains(field, value, ignoreCase = true)` ignores the case of the Latin letters `A`–`Z`
+alone: SQLite tells no other letter's case without ICU, so no engine does — `"doom"` finds `"Doom"`,
+while `"дум"` does not find `"Дум"`.
+
 A field holding null is selected by `Filter.Equals` to null and by `Filter.InList` holding null
 alone — nothing is less or more than null, it contains nothing and matches no pattern. `Filter.Not`
 selects every rekord the filter it holds does not, those holding null included.
