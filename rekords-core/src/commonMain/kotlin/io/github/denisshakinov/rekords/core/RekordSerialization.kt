@@ -125,6 +125,10 @@ private fun SerialDescriptor.embeddedFields(index: Int): List<FieldWithType> {
         "${field.name} of $serialName holds an embedded class that may be none, which cannot be " +
             "an id: make it non-null."
     }
+    require(!field.fullText) {
+        "${field.name} of $serialName holds an embedded class, which has no words of its own: " +
+            "make the fields of the class holding text fullText instead."
+    }
     val fields: List<FieldWithType> = embedded.allFields()
     require(fields.none { it.type is RekordListKType }) {
         "${field.name} of $serialName holds an embedded class holding a list, which it cannot: " +
@@ -142,6 +146,7 @@ private fun SerialDescriptor.embeddedFields(index: Int): List<FieldWithType> {
             id = field.id,
             searchable = field.searchable || innerField.searchable,
             encryption = innerField.encryption,
+            fullText = innerField.fullText,
         )
         require(!embeddedField.id || innerType !is RekordKType || !innerType.isMarkedNullable) {
             "${innerField.name} of ${embedded.serialName} holds a rekord that may be none, which " +
@@ -209,6 +214,14 @@ fun SerialDescriptor.getFieldType(index: Int): KType {
     require(!field.id || plainType !is RekordKType || !plainType.isMarkedNullable) {
         "${field.name} of $serialName holds a rekord that may be none, which cannot be an id: " +
             "make it non-null."
+    }
+    require(!field.fullText || plainType.classifier == String::class) {
+        "${field.name} of $serialName holds no text, so it has no words to be found by: only a " +
+            "String field can be fullText."
+    }
+    require(!field.fullText || field.encryption == Encryption.None) {
+        "${field.name} of $serialName is encrypted, so it cannot be fullText: its words would " +
+            "tell the storage what it holds."
     }
     if (field.encryption == Encryption.None) return plainType
     require(plainType !is RekordKType && plainType !is RekordListKType) {

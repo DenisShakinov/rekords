@@ -353,9 +353,16 @@ private class JoinedTransactionEditor(
         return runOnEditor(editor) { count(rekordType, flatFilter) }
     }
 
-    /** See [Embedded]: a storage is asked about the fields of an embedded class as the rekord's. */
-    private fun Filter.flattened(rekordType: String): Filter =
-        if (editor.schemaEditor.hasSchema) flattened(rekordType, editor.schemaEditor.schema) else this
+    /**
+     * See [Embedded]: a storage is asked about the fields of an embedded class as the rekord's.
+     * The words of a field are looked for only where the schema has them kept - see
+     * [checkFullText].
+     */
+    private fun Filter.flattened(rekordType: String): Filter {
+        val schemaEditor = editor.schemaEditor
+        if (!schemaEditor.hasSchema) return this
+        return flattened(rekordType, schemaEditor.schema).checkFullText(rekordType) { schemaEditor.rekordSchema(it) }
+    }
 
     override suspend fun <T> transaction(action: suspend RekordsEditor.() -> T): T =
         runOnEditor(this, action)

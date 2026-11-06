@@ -1,5 +1,6 @@
 package io.github.denisshakinov.rekords.sample
 
+import io.github.denisshakinov.rekords.core.Filter
 import io.github.denisshakinov.rekords.core.Order
 import io.github.denisshakinov.rekords.core.RekordsStore
 import io.github.denisshakinov.rekords.sample.firstrelease.FirstReleaseNoteRekord
@@ -8,7 +9,7 @@ import kotlinx.datetime.LocalDateTime
 
 /**
  * A storage the first release wrote, opened by the application as it is now: the first operation
- * runs [NotesSchema.onUpgrade] from version 1 to 3, in a transaction of its own.
+ * runs [NotesSchema.onUpgrade] from version 1 to 4, in a transaction of its own.
  */
 suspend fun migration() {
     section("Migration")
@@ -18,17 +19,22 @@ suspend fun migration() {
     val store = RekordsStore(NotesSchema()) {
         name = "migration.db"
     }
-    // "text" is now the title, the due date is null, the pin is false and the color is gone.
+    // "text" is now the title, found by its words, the due date is null, the pin is false and the
+    // color is gone.
     val upgraded = store
         .getRekords<NoteRekord>(orderBy = listOf(Order.Ascending(NoteRekord.ID)))
         .getOrThrow()
     show(
-        "Read at version 3",
+        "Read at version 4",
         upgraded.map {
             "#${it.id} title \"${it.title}\", due date ${it.dueDate}, pinned ${it.pinned}"
         },
     )
     show("Fields stored", store.query<NoteRekord>(limit = 1).getOrThrow().single().keys)
+    show(
+        "Found by \"rel fir\"",
+        store.getRekords<NoteRekord>(Filter.FullText("rel fir", NoteRekord.TITLE)).getOrThrow().map { it.title },
+    )
 }
 
 /** What a user of the first release has on their device - see [FirstReleaseSchema]. */

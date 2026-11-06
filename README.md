@@ -99,7 +99,8 @@ The [`sample`](sample) module runs every scenario below on the JVM, the cache in
 
 A rekord is a class annotated with `@Rekord`, whose constructor properties are `@Field`s. The fields
 marked `id = true` identify a rekord: writing one with the same ids updates it instead of adding
-another. A field marked `searchable = true` may be indexed by the engine.
+another. A field marked `searchable = true` may be indexed by the engine, and one marked
+`fullText = true` is found by its words — see [full text search](#full-text-search).
 
 ```kotlin
 @Rekord(type = "note")
@@ -281,6 +282,37 @@ Filter.Glob(NoteRekord.TITLE, "release [0-9]*", ignoreCase = true)
 A field holding null is selected by `Filter.Equals` to null and by `Filter.InList` holding null
 alone — nothing is less or more than null, it contains nothing and matches no pattern. `Filter.Not`
 selects every rekord the filter it holds does not, those holding null included.
+
+### Full text search
+
+A `String` field marked `fullText = true` is found by its words with `Filter.FullText`: every word
+of the query has to begin a word of one of the fields given, in any order — `"sup mar"` and
+`"mar sup"` alike find `"Super Mario"`.
+
+```kotlin
+@Field(name = TITLE, fullText = true) val title: String
+@Field(name = BODY, fullText = true) val body: String?
+
+Filter.FullText("sup mar", ArticleRekord.TITLE, ArticleRekord.BODY)
+```
+
+A word is a run of letters and digits, and the case of any letter is ignored — `"дум"` finds
+`"Дум"`. Nothing else is folded: a letter with a diacritic is not the letter without it, a text
+without spaces is one word, and a word is found by its beginning alone. A query of no words selects
+every rekord. `Filter.WordPrefix(field, word)` asks one word of one field, to be held in a
+`Filter.Not` or a `Filter.Nested`. Searching a field not marked fails with an
+`IllegalArgumentException`, and an encrypted field cannot be marked.
+
+The SQL engine keeps the words of a field as rekords are written, so a field already stored that
+the schema comes to mark is made one by a migration:
+
+```kotlin
+if (oldVersion < 4) {
+    enableFullText<NoteRekord>(NoteRekord.TITLE)
+}
+```
+
+A search reads through every rekord of the type, as `Filter.Contains` does.
 
 ### Transactions
 

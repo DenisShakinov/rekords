@@ -54,5 +54,6 @@ private fun FieldFilter.withField(name: String): FieldFilter = when (this) {
     is FieldFilter.InList -> copy(field = name)
     is FieldFilter.Contains -> copy(field = name)
     is FieldFilter.Glob -> copy(field = name)
+    is FieldFilter.WordPrefix -> copy(field = name)
     is FieldFilter.Nested -> copy(field = name)
 }

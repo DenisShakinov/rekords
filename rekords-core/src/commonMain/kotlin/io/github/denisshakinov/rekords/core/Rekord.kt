@@ -39,6 +39,10 @@ annotation class Embedded
  * @property prefixed for a field holding an [Embedded] class: whether the fields of the class are
  * named after this one - `game` holding `id` keeping it as `game_id` - or by their own names alone.
  * A field holding anything else is not affected by it.
+ * @property fullText whether the rekords are found by the words of the field, with
+ * [Filter.FullText]. Only a field holding text can be, and not an encrypted one: the words would
+ * tell what it holds. A storage keeps the words of the field as it is written, so a field already
+ * stored is made one by a migration - see [RekordsMigrationEditor.enableFullText].
  */
 @SerialInfo
 @Target(AnnotationTarget.PROPERTY)
@@ -48,6 +52,7 @@ annotation class Field(
     val searchable: Boolean = false,
     val encryption: Encryption = Encryption.None,
     val prefixed: Boolean = true,
+    val fullText: Boolean = false,
 )
 
 /**

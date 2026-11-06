@@ -51,6 +51,8 @@ fun RekordValues.matches(filter: Filter): Boolean {
                     text.matchesGlob(filter.pattern)
                 }
             } == true
+        is FieldFilter.WordPrefix -> (this[filter.field] as? RekordValue.Primitive)?.value?.toString()
+            ?.let { hasWordPrefixed(it, filter.prefix) } == true
         is FieldFilter.Nested -> when (val composite = this[filter.field]) {
             is RekordValue.Composite -> composite.values.matches(filter.filter)
             is RekordValue.CompositeList -> composite.list.any { it.values.matches(filter.filter) }

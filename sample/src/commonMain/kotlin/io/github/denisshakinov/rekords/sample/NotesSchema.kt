@@ -3,6 +3,7 @@ package io.github.denisshakinov.rekords.sample
 import io.github.denisshakinov.rekords.core.RekordsMigrationEditor
 import io.github.denisshakinov.rekords.core.RekordsSchema
 import io.github.denisshakinov.rekords.core.addField
+import io.github.denisshakinov.rekords.core.enableFullText
 import io.github.denisshakinov.rekords.core.removeField
 import io.github.denisshakinov.rekords.core.renameField
 import kotlin.reflect.KClass
@@ -18,7 +19,7 @@ import kotlin.reflect.KClass
  */
 class NotesSchema : RekordsSchema {
 
-    override val version: Int = 3
+    override val version: Int = 4
 
     override val rekordTypes: List<KClass<*>> = listOf(
         NoteRekord::class,
@@ -40,6 +41,11 @@ class NotesSchema : RekordsSchema {
             renameField<NoteRekord>("text", NoteRekord.TITLE)
             // The value the notes stored before are given.
             addField<NoteRekord>(NoteRekord.PINNED, defaultValue = false)
+        }
+        // Version 4: notes are found by the words of their titles.
+        if (oldVersion < 4) {
+            // The words of the titles stored before are kept, as a new title's are when written.
+            enableFullText<NoteRekord>(NoteRekord.TITLE)
         }
     }
 }

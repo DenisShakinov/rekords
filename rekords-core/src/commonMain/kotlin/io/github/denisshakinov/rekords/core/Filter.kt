@@ -64,6 +64,42 @@ sealed interface Filter {
         fun Glob(field: String, pattern: String, ignoreCase: Boolean = false) =
             FieldFilter.Glob(field, pattern, ignoreCase)
 
+        /**
+         * Selects the rekords whose [fields] hold every word of [query], each as the beginning of
+         * one of their words - in any of the fields, and in any order: `"sup mar"` and
+         * `"mar sup"` alike find `"Super Mario"`. A query of no words selects every rekord.
+         *
+         * Each field has to be marked [Field.fullText]; the words are told as
+         * [fullTextWords] tells them, any letter's case ignored.
+         *
+         * @throws IllegalArgumentException when no field is given.
+         */
+        fun FullText(query: String, vararg fields: String): Filter {
+            require(fields.isNotEmpty()) { "A full text search looks into one field at least" }
+            return And(
+                query.fullTextWords().distinct().map { word ->
+                    if (fields.size == 1) {
+                        FieldFilter.WordPrefix(fields.single(), word)
+                    } else {
+                        Or(fields.map { FieldFilter.WordPrefix(it, word) })
+                    }
+                },
+            )
+        }
+
+        /**
+         * Selects the rekords whose [field] holds a word beginning with [word] - what
+         * [FullText] asks of a field for each word it is given, here to be held in a [Not] or a
+         * [Nested]. The field has to be marked [Field.fullText].
+         *
+         * @throws IllegalArgumentException when [word] is not one word.
+         */
+        fun WordPrefix(field: String, word: String): FieldFilter.WordPrefix {
+            val words = word.fullTextWords()
+            require(words.size == 1) { "\"$word\" is not one word, but ${words.size}" }
+            return FieldFilter.WordPrefix(field, words.single())
+        }
+
         fun Nested(field: String, filter: FieldFilter) = FieldFilter.Nested(field, filter)
 
         fun And(vararg filters: Filter) = And(filters.asIterable())
@@ -94,6 +130,12 @@ sealed class FieldFilter(open val field: String) : Filter {
         override val field: String,
         val pattern: String,
         val ignoreCase: Boolean = false,
+    ) : FieldFilter(field)
+
+    /** See [Filter.WordPrefix]: [prefix] is a word as [fullTextWords] tells it, lowered. */
+    data class WordPrefix internal constructor(
+        override val field: String,
+        val prefix: String,
     ) : FieldFilter(field)
 
     data class Nested internal constructor(

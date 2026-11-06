@@ -98,6 +98,19 @@ abstract class RekordsSchemaEditor {
      * @param newFieldName the new name to assign to the field.
      */
     abstract suspend fun renameField(rekordType: String, oldFieldName: String, newFieldName: String)
+
+    /**
+     * Keeps the words of a field already stored, which the schema has come to mark
+     * [Field.fullText], for the rekords stored to be found by them - as a field added or a rekord
+     * type created as one has them kept from the start.
+     *
+     * An editor that finds words in the rekords themselves as it reads them keeps none, and has
+     * nothing to do.
+     *
+     * @param rekordType the type name of the rekord holding the field.
+     * @param fieldName the name of the field, marked fullText in the schema.
+     */
+    open suspend fun enableFullText(rekordType: String, fieldName: String) = Unit
 }
 
 internal suspend fun RekordsSchemaEditor.init(rekordsEditor: RekordsMigrationEditor) {

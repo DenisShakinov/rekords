@@ -37,6 +37,13 @@ interface RekordsMigrationEditor : RekordsEditor {
 
     /** See [RekordsSchemaEditor.renameField]. */
     suspend fun renameField(rekordType: String, oldFieldName: String, newFieldName: String)
+
+    /**
+     * See [RekordsSchemaEditor.enableFullText].
+     *
+     * @throws IllegalArgumentException when the schema does not mark the field fullText.
+     */
+    suspend fun enableFullText(rekordType: String, fieldName: String)
 }
 
 suspend inline fun <reified R> RekordsMigrationEditor.addRekordType() =
@@ -60,6 +67,9 @@ suspend inline fun <reified R> RekordsMigrationEditor.renameField(
     oldFieldName: String,
     newFieldName: String
 ) = renameField(rekordType<R>(), oldFieldName, newFieldName)
+
+suspend inline fun <reified R> RekordsMigrationEditor.enableFullText(fieldName: String) =
+    enableFullText(rekordType<R>(), fieldName)
 
 /**
  * The migration editor over [editor], the one a transaction runs on: the changes to the storage go
@@ -89,6 +99,13 @@ internal class SchemaMigrationEditor(
 
     override suspend fun renameField(rekordType: String, oldFieldName: String, newFieldName: String) =
         editor.schemaEditor.renameField(rekordType, oldFieldName, newFieldName)
+
+    override suspend fun enableFullText(rekordType: String, fieldName: String) {
+        require(editor.schemaEditor.rekordSchema(rekordType)[fieldName]?.field?.fullText == true) {
+            "$fieldName of $rekordType is not fullText in the schema: mark it @Field(fullText = true)."
+        }
+        editor.schemaEditor.enableFullText(rekordType, fieldName)
+    }
 
     /** Joins the transaction the migration runs in, as the store's editors do. */
     override suspend fun <T> transaction(action: suspend RekordsEditor.() -> T): T =

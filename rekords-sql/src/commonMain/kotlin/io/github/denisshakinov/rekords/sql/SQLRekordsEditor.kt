@@ -14,6 +14,8 @@ import io.github.denisshakinov.rekords.core.RekordValues
 import io.github.denisshakinov.rekords.core.RekordsEditor
 import io.github.denisshakinov.rekords.core.RekordsSchemaEditor
 import io.github.denisshakinov.rekords.core.elementRekordType
+import io.github.denisshakinov.rekords.core.field
+import io.github.denisshakinov.rekords.core.fullTextTerms
 import io.github.denisshakinov.rekords.core.primitiveAt
 import io.github.denisshakinov.rekords.core.rekordSchema
 import io.github.denisshakinov.rekords.core.rekordType
@@ -69,7 +71,13 @@ class SQLRekordsEditor(
                     value == null && type is RekordKType ->
                         idFieldNames(type.rekordType()).forEach { childId -> put("${fieldName}_$childId", null) }
                     value is RekordValue.CompositeList || type is RekordListKType -> {}
-                    else -> put(fieldName, (value as? RekordValue.Primitive)?.value)
+                    else -> {
+                        val primitive = (value as? RekordValue.Primitive)?.value
+                        put(fieldName, primitive)
+                        if (schema[fieldName]?.field?.fullText == true) {
+                            put(fullTextColumn(fieldName), primitive?.let { fullTextTerms(it.toString()) })
+                        }
+                    }
                 }
             }
         }

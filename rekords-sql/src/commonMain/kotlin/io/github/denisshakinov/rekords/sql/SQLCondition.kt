@@ -12,6 +12,7 @@ import io.github.denisshakinov.rekords.core.RekordKType
 import io.github.denisshakinov.rekords.core.RekordListKType
 import io.github.denisshakinov.rekords.core.elementRekordType
 import io.github.denisshakinov.rekords.core.field
+import io.github.denisshakinov.rekords.core.fullTextSearched
 import io.github.denisshakinov.rekords.core.idPaths
 import io.github.denisshakinov.rekords.core.rekordType
 import io.github.denisshakinov.rekords.core.type
@@ -76,6 +77,11 @@ internal class SQLConditionBuilder(
             args += filter.pattern
             val column = column(alias, filter.field)
             if (filter.ignoreCase) "(lower($column) GLOB lower(?))" else "($column GLOB ?)"
+        }
+        // The words of the field are kept in a column of their own, each between spaces.
+        is FieldFilter.WordPrefix -> {
+            args += fullTextSearched(filter.prefix)
+            "(instr(${column(alias, fullTextColumn(filter.field))}, ?) > 0)"
         }
         is FieldValueFilter.Equals -> if (filter.value == null) {
             "(${column(alias, filter.field)} IS NULL)"
@@ -217,6 +223,12 @@ internal class SQLConditionBuilder(
 
 /** A column an id of a rekord is kept in, named [name], holding the value [path] leads to. */
 internal class IdColumn(val name: String, val path: List<String>)
+
+/**
+ * The column the words of the fullText [field] are kept in, as [io.github.denisshakinov.rekords.core.fullTextTerms]
+ * keeps them: SQLite cannot split text into words itself. It is never read back as a field.
+ */
+internal fun fullTextColumn(field: String): String = "${field}__fts"
 
 /** The table the rekords of the list [field] of [rekordType] are linked to theirs in. */
 internal fun junctionTable(rekordType: String, field: String): String = "${rekordType}_$field"

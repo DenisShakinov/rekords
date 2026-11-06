@@ -13,6 +13,7 @@ import io.github.denisshakinov.rekords.core.allFields
 import io.github.denisshakinov.rekords.core.elementAllFields
 import io.github.denisshakinov.rekords.core.elementRekordType
 import io.github.denisshakinov.rekords.core.field
+import io.github.denisshakinov.rekords.core.fullTextTerms
 import io.github.denisshakinov.rekords.core.rekordSchema
 import io.github.denisshakinov.rekords.core.rekordType
 import io.github.denisshakinov.rekords.core.toStoredValue
@@ -83,6 +84,9 @@ class SQLRekordsSchemaEditor(
                 else -> {
                     addColumn((fieldAnnotation to fieldType).toSqlColumn(), fieldAnnotation.name)
                     if (fieldAnnotation.searchable) indices.add(fieldAnnotation.name)
+                    if (fieldAnnotation.fullText) {
+                        addColumn(SQLColumn(fullTextColumn(fieldAnnotation.name), isPrimaryKey = false, SQLType.TextNullable), fieldAnnotation.name)
+                    }
                 }
             }
         }
@@ -163,22 +167,43 @@ class SQLRekordsSchemaEditor(
         if (!column.type.isNullable) {
             // SQLite only adds a NOT NULL column with a DEFAULT, so the table is rebuilt instead.
             recreateTable(rekordType, columnsToAdd = listOf(column to checkNotNull(fillValue)))
-            return
+        } else {
+            connection().rawQuery(
+                "ALTER TABLE $rekordType ADD COLUMN ${column.name} ${column.type.toSqlStringType()}"
+            )
+            if (fillValue != null) {
+                connection().rawQuery("UPDATE $rekordType SET ${column.name} = ?", listOf(fillValue))
+            }
+            if (field.field.searchable) connection().createIndex(rekordType, column.name)
         }
-        connection().rawQuery(
-            "ALTER TABLE $rekordType ADD COLUMN ${column.name} ${column.type.toSqlStringType()}"
-        )
-        if (fillValue != null) {
-            connection().rawQuery("UPDATE $rekordType SET ${column.name} = ?", listOf(fillValue))
+        if (field.field.fullText) enableFullText(rekordType, column.name)
+    }
+
+    /**
+     * Adds the column the words of the field are kept in, unless the table has it, and fills it
+     * from the values the rekords stored hold - each row found by its rowid, which nothing in
+     * between rebuilds the table to change.
+     */
+    override suspend fun enableFullText(rekordType: String, fieldName: String) {
+        val wordsColumn = fullTextColumn(fieldName)
+        if (connection().tableSchema(rekordType).none { it.name == wordsColumn }) {
+            connection().rawQuery("ALTER TABLE $rekordType ADD COLUMN $wordsColumn ${SQLType.TextNullable.toSqlStringType()}")
         }
-        if (field.field.searchable) connection().createIndex(rekordType, column.name)
+        val rows = connection().rawQuery("SELECT rowid AS $ROW_ID, $fieldName FROM $rekordType").toList()
+        for (row in rows) {
+            connection().rawQuery(
+                "UPDATE $rekordType SET $wordsColumn = ? WHERE rowid = ?",
+                listOf(row[fieldName]?.let { fullTextTerms(it.toString()) }, row[ROW_ID]),
+            )
+        }
     }
 
     override suspend fun removeField(rekordType: String, fieldName: String) {
         if (isCompositeListField(rekordType, fieldName)) {
             connection().rawQuery("DROP TABLE IF EXISTS ${rekordType}_${fieldName}")
         } else {
-            recreateTable(rekordType, columnsToRemove = setOf(fieldName))
+            // The words of a fullText field go with it - a table without them leaves this alone.
+            recreateTable(rekordType, columnsToRemove = setOf(fieldName, fullTextColumn(fieldName)))
         }
     }
 
@@ -192,7 +217,13 @@ class SQLRekordsSchemaEditor(
                 "ALTER TABLE ${rekordType}_${oldFieldName} RENAME TO ${rekordType}_${newFieldName}"
             )
         } else {
-            recreateTable(rekordType, columnRenames = mapOf(oldFieldName to newFieldName))
+            recreateTable(
+                rekordType,
+                columnRenames = mapOf(
+                    oldFieldName to newFieldName,
+                    fullTextColumn(oldFieldName) to fullTextColumn(newFieldName),
+                ),
+            )
         }
     }
 
@@ -249,6 +280,7 @@ class SQLRekordsSchemaEditor(
         private const val KEY_COLUMN = "key"
         private const val VALUE_COLUMN = "value"
         private const val VERSION_KEY = "version"
+        private const val ROW_ID = "_rowid"
     }
 }
 

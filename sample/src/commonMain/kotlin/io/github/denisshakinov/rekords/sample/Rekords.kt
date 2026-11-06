@@ -13,7 +13,7 @@ import kotlinx.datetime.LocalDateTime
 class NoteRekord(
     @Field(name = ID, id = true)
     val id: Long,
-    @Field(name = TITLE, searchable = true)
+    @Field(name = TITLE, searchable = true, fullText = true)
     val title: String,
     @Field(name = CREATED)
     val created: LocalDateTime,
