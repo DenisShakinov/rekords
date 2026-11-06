@@ -72,8 +72,8 @@ enum class Encryption {
     /**
      * The same value encrypted to the same ciphertext every time, so a rekord is selected by
      * whether the field equals a value - [Filter.Equals], [Filter.InList] - and the field can be
-     * an id or searchable. What a range, [Filter.Contains] or an order asks of it stays out of
-     * reach.
+     * an id or searchable. What a range, [Filter.Contains], [Filter.Glob] or an order asks of it
+     * stays out of reach.
      *
      * It is what lets the storage tell which rekords hold the same value, and how many do: a field
      * of a few values - a flag, a state - is better encrypted [Randomized].

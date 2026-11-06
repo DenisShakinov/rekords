@@ -563,6 +563,79 @@ abstract class RekordsEditorTest(private val rekordsEditor: RekordsEditor) {
         assertEquals(expected = 1, actual = count)
     }
 
+    /**
+     * A SQL engine matches a glob itself and the others match it in memory: both have to select
+     * the same rekords, SQLite's `GLOB` being what tells which.
+     */
+    open fun check_filter_by_glob() = test {
+        suspend fun titles(filter: Filter): List<String> = rekordsStore
+            .getRekords<TestGameRekord>(filter, orderBy = listOf(Order.Ascending(TestGameRekord.ID)))
+            .getOrThrow()
+            .map { it.title }
+
+        assertEquals(
+            expected = listOf("Silent Hill", "Silent Hill 2", "Silent Hill 3"),
+            actual = titles(Filter.Glob(TestGameRekord.TITLE, "Silent Hill*")),
+        )
+        assertEquals(
+            expected = listOf("Silent Hill 2", "Silent Hill 3"),
+            actual = titles(Filter.Glob(TestGameRekord.TITLE, "Silent Hill ?")),
+        )
+        assertEquals(
+            expected = listOf("Doom 2", "Silent Hill 2", "Silent Hill 3"),
+            actual = titles(Filter.Glob(TestGameRekord.TITLE, "*[23]")),
+        )
+        assertEquals(
+            expected = listOf("Doom", "Silent Hill"),
+            actual = titles(Filter.Glob(TestGameRekord.TITLE, "*[^0-9]")),
+        )
+        // Case counts, unlike in a LIKE.
+        assertEquals(expected = emptyList(), actual = titles(Filter.Glob(TestGameRekord.TITLE, "doom*")))
+        // A set left open matches nothing.
+        assertEquals(expected = emptyList(), actual = titles(Filter.Glob(TestGameRekord.TITLE, "Doom[")))
+        assertEquals(
+            expected = listOf("Doom", "Doom 2"),
+            actual = titles(Filter.Not(Filter.Glob(TestGameRekord.TITLE, "Silent*"))),
+        )
+        // A field holding no text is matched as the text of its value.
+        assertEquals(
+            expected = listOf("Silent Hill", "Silent Hill 3"),
+            actual = titles(Filter.Glob(TestGameRekord.ID, "[35]")),
+        )
+        assertEquals(
+            expected = listOf("Silent Hill 3"),
+            actual = titles(Filter.Nested(TestGameRekord.STATE, Filter.Glob(TestGameStateRekord.NAME, "W*"))),
+        )
+        assertEquals(
+            expected = 4,
+            actual = rekordsStore
+                .count<TestGameRekord>(Filter.Nested(TestGameRekord.STATE, Filter.Glob(TestGameStateRekord.NAME, "[CP]*")))
+                .getOrThrow(),
+        )
+
+        // A character beyond the Basic Multilingual Plane is one character to `?`.
+        rekordsStore.putRekord(
+            TestGameRekord(
+                id = 6,
+                title = "Doom 🎮",
+                releaseDate = LocalDate(2016, 5, 13),
+                state = TestGameStateRekord(id = 2, name = "Playing"),
+                properties = emptyList(),
+            ),
+        )
+        assertEquals(
+            expected = listOf("Doom 2", "Doom 🎮"),
+            actual = titles(Filter.Glob(TestGameRekord.TITLE, "Doom ?")),
+        )
+        assertEquals(expected = emptyList(), actual = titles(Filter.Glob(TestGameRekord.TITLE, "Doom ??")))
+
+        rekordsStore.delete<TestGameRekord>(Filter.Glob(TestGameRekord.TITLE, "Doom*"))
+        assertEquals(
+            expected = listOf("Silent Hill", "Silent Hill 2", "Silent Hill 3"),
+            actual = titles(Filter.Glob(TestGameRekord.TITLE, "*")),
+        )
+    }
+
     open fun check_composite_delete_parent_does_not_affect_shared_state() = test {
         // Doom (id=1) and Doom 2 (id=2) share state id=3
         rekordsStore.delete<TestGameRekord>(filter = Filter.Equals(TestGameRekord.ID, 1))

@@ -53,5 +53,6 @@ private fun FieldFilter.withField(name: String): FieldFilter = when (this) {
     is FieldValueFilter.GreaterThanOrEquals -> copy(field = name)
     is FieldFilter.InList -> copy(field = name)
     is FieldFilter.Contains -> copy(field = name)
+    is FieldFilter.Glob -> copy(field = name)
     is FieldFilter.Nested -> copy(field = name)
 }

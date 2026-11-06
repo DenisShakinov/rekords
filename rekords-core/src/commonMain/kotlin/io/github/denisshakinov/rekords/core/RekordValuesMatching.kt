@@ -43,6 +43,8 @@ fun RekordValues.matches(filter: Filter): Boolean {
         is FieldFilter.InList -> filter.list.contains((this[filter.field] as? RekordValue.Primitive)?.value)
         is FieldFilter.Contains -> (this[filter.field] as? RekordValue.Primitive)?.value?.toString()
             ?.contains(filter.value) == true
+        is FieldFilter.Glob -> (this[filter.field] as? RekordValue.Primitive)?.value?.toString()
+            ?.matchesGlob(filter.pattern) == true
         is FieldFilter.Nested -> when (val composite = this[filter.field]) {
             is RekordValue.Composite -> composite.values.matches(filter.filter)
             is RekordValue.CompositeList -> composite.list.any { it.values.matches(filter.filter) }

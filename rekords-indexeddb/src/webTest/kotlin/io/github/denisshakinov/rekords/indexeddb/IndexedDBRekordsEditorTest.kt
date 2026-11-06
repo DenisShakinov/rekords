@@ -52,6 +52,9 @@ class IndexedDBRekordsEditorTest : RekordsEditorTest(IndexedDBRekordsEditor(next
     override fun check_filter_by_nested_field() = super.check_filter_by_nested_field()
 
     @Test
+    override fun check_filter_by_glob() = super.check_filter_by_glob()
+
+    @Test
     override fun check_composite_delete_parent_does_not_affect_shared_state() = super.check_composite_delete_parent_does_not_affect_shared_state()
 
     @Test

@@ -190,6 +190,7 @@ abstract class RekordsEncryptionTest(
             rekordsStore.getRekords<TestSecretRekord>(Filter.Equals(TestSecretRekord.NOTE, "Same note")),
             rekordsStore.getRekords<TestSecretRekord>(Filter.LessThan(TestSecretRekord.ID, 3L)),
             rekordsStore.getRekords<TestSecretRekord>(Filter.Contains(TestSecretRekord.OWNER, "ali")),
+            rekordsStore.getRekords<TestSecretRekord>(Filter.Glob(TestSecretRekord.OWNER, "ali*")),
             rekordsStore.getRekords<TestSecretRekord>(
                 orderBy = listOf(Order.Descending(TestSecretRekord.OWNER)),
             ),

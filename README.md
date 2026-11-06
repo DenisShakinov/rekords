@@ -258,6 +258,15 @@ lists with every item they hold. Nested filters look as deep as rekords are nest
 Filter.Nested(NoteRekord.FOLDER, Filter.Nested(FolderRekord.OWNER, Filter.Equals(UserRekord.ID, 42L)))
 ```
 
+`Filter.Contains` selects by a piece of text the field holds, `Filter.Glob` by a pattern it matches,
+the way SQLite's `GLOB` matches it in every engine: `*` matches any run of characters, `?` exactly
+one, `[abc]` or `[a-z]` one of a set and `[^abc]` one outside it. Case counts, and nothing escapes a
+character — `[*]` matches an asterisk:
+
+```kotlin
+Filter.Glob(NoteRekord.TITLE, "Draft [0-9]*")
+```
+
 ### Transactions
 
 Operations run in `transaction` are applied together once it completes; if it throws, none of them
@@ -333,9 +342,9 @@ val account = store
   value, so a field of a few values, such as a flag, is better encrypted randomized.
 - `Encryption.Randomized` encrypts the value anew each time. Rekords are selected by nothing but
   whether the field is null, so it can be neither an id nor searchable.
-- An encrypted field cannot be compared by a range, `Filter.Contains` or an order: the operation
-  fails with an `IllegalArgumentException`. A field holding a rekord is not encrypted itself — its
-  rekord's fields are, each as declared.
+- An encrypted field cannot be compared by a range, `Filter.Contains`, `Filter.Glob` or an order:
+  the operation fails with an `IllegalArgumentException`. A field holding a rekord is not encrypted
+  itself — its rekord's fields are, each as declared.
 - Encrypting a field already stored changes how it is kept: a migration removes and adds it again,
   rather than the declaration alone. A store whose schema encrypts a field fails without a cipher.
 

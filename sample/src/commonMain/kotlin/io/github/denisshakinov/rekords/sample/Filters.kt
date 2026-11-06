@@ -16,6 +16,10 @@ suspend fun filters() {
         Filter.Contains(NoteRekord.TITLE, "Draft")
     show("Drafts at work", store.getRekords<NoteRekord>(workDrafts, byId).getOrThrow())
 
+    // A pattern, matched as SQLite's GLOB matches it: case counts, `[0-9]` is one digit.
+    val releases = Filter.Glob(NoteRekord.TITLE, "Release [0-9]*")
+    show("Releases", store.getRekords<NoteRekord>(releases, byId).getOrThrow())
+
     val dueTodayOrUndated = Filter.Equals(NoteRekord.DUE_DATE, today) or
         Filter.Equals(NoteRekord.DUE_DATE, null)
     show("Due today or undated", store.getRekords<NoteRekord>(dueTodayOrUndated, byId).getOrThrow())

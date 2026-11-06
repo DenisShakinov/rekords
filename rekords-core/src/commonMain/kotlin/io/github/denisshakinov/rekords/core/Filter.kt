@@ -24,6 +24,22 @@ sealed interface Filter {
 
         fun Contains(field: String, value: String) = FieldFilter.Contains(field, value)
 
+        /**
+         * Selects the rekords whose [field] matches [pattern] the way SQLite's `GLOB` matches it,
+         * in every engine alike:
+         *
+         * - `*` matches any run of characters, none included, and `?` exactly one;
+         * - `[abc]` matches one of the characters listed, `[a-z]` one within the range, and
+         *   `[^...]` one the set does not hold. A `]` right after the bracket - or after the
+         *   caret - is one of the characters, as is a `-` listed first or last.
+         * - Nothing escapes a character: `*`, `?` and `[` stand for themselves inside a set,
+         *   `[*]` matching an asterisk. A set left open matches nothing.
+         *
+         * Case counts. A field holding no text is matched as the text of its value; a null one
+         * matches no pattern.
+         */
+        fun Glob(field: String, pattern: String) = FieldFilter.Glob(field, pattern)
+
         fun Nested(field: String, filter: FieldFilter) = FieldFilter.Nested(field, filter)
 
         fun And(vararg filters: Filter) = And(filters.asIterable())
@@ -45,6 +61,12 @@ sealed class FieldFilter(open val field: String) : Filter {
     data class Contains internal constructor(
         override val field: String,
         val value: String
+    ) : FieldFilter(field)
+
+    /** See [Filter.Glob]. */
+    data class Glob internal constructor(
+        override val field: String,
+        val pattern: String
     ) : FieldFilter(field)
 
     data class Nested internal constructor(

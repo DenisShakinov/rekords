@@ -124,7 +124,7 @@ internal class EncryptingRekordsEditor(
      * which a [Encryption.Deterministic] field holds for the same values.
      *
      * @throws IllegalArgumentException when it compares an encrypted field in a way no ciphertext
-     * tells - by a range, by what it contains - or compares a [Encryption.Randomized] one to
+     * tells - by a range, by what it contains, by a pattern - or compares a [Encryption.Randomized] one to
      * anything but null.
      */
     private fun Filter.encrypted(rekordType: String): Filter = when (this) {

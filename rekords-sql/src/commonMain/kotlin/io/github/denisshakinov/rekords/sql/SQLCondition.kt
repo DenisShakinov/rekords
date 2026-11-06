@@ -71,6 +71,10 @@ internal class SQLConditionBuilder(
             args += "%${filter.value}%"
             "(${column(alias, filter.field)} LIKE ?)"
         }
+        is FieldFilter.Glob -> {
+            args += filter.pattern
+            "(${column(alias, filter.field)} GLOB ?)"
+        }
         is FieldValueFilter.Equals -> if (filter.value == null) {
             "(${column(alias, filter.field)} IS NULL)"
         } else {
