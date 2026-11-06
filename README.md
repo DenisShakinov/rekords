@@ -238,7 +238,7 @@ val dueThisWeek: List<NoteRekord> = store
     )
     .getOrThrow()
 
-val count: Int = store.count<NoteRekord>(Filter.Contains(NoteRekord.TITLE, "draft")).getOrThrow()
+val count: Int = store.count<NoteRekord>(Filter.Contains(NoteRekord.TITLE, "Draft")).getOrThrow()
 
 store.deleteRekord(note)
 store.delete<NoteRekord>(Filter.LessThan(NoteRekord.CREATED, cutoff))
@@ -258,14 +258,19 @@ lists with every item they hold. Nested filters look as deep as rekords are nest
 Filter.Nested(NoteRekord.FOLDER, Filter.Nested(FolderRekord.OWNER, Filter.Equals(UserRekord.ID, 42L)))
 ```
 
-`Filter.Contains` selects by a piece of text the field holds, `Filter.Glob` by a pattern it matches,
-the way SQLite's `GLOB` matches it in every engine: `*` matches any run of characters, `?` exactly
-one, `[abc]` or `[a-z]` one of a set and `[^abc]` one outside it. Case counts, and nothing escapes a
-character — `[*]` matches an asterisk:
+`Filter.Contains` selects by a piece of text the field holds, every character looked for as itself.
+`Filter.Glob` selects by a pattern the field matches, the way SQLite's `GLOB` matches it in every
+engine: `*` matches any run of characters, `?` exactly one, `[abc]` or `[a-z]` one of a set and
+`[^abc]` one outside it, nothing escaping a character — `[*]` matches an asterisk. Case counts in
+both:
 
 ```kotlin
 Filter.Glob(NoteRekord.TITLE, "Draft [0-9]*")
 ```
+
+A field holding null is selected by `Filter.Equals` to null and by `Filter.InList` holding null
+alone — nothing is less or more than null, it contains nothing and matches no pattern. `Filter.Not`
+selects every rekord the filter it holds does not, those holding null included.
 
 ### Transactions
 

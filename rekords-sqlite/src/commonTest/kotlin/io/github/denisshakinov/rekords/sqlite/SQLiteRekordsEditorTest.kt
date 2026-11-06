@@ -255,6 +255,9 @@ abstract class SQLiteRekordsEditorTest(private val rekordsEditor: RekordsEditor)
     override fun check_filter_by_glob() = super.check_filter_by_glob()
 
     @Test
+    override fun check_filter_text_and_null_semantics() = super.check_filter_text_and_null_semantics()
+
+    @Test
     override fun check_composite_delete_parent_does_not_affect_shared_state() =
         super.check_composite_delete_parent_does_not_affect_shared_state()
 

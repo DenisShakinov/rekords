@@ -30,16 +30,10 @@ private fun Filter.collectPinnedValues(into: MutableMap<String, List<PrimitiveRe
 fun RekordValues.matches(filter: Filter): Boolean {
     return when (filter) {
         is FieldValueFilter.Equals -> (this[filter.field] as? RekordValue.Primitive)?.value == filter.value
-        is FieldValueFilter.LessThan -> comparePrimitive(this[filter.field], filter.value) < 0
-        is FieldValueFilter.LessThanOrEquals -> comparePrimitive(
-            this[filter.field],
-            filter.value
-        ) <= 0
-        is FieldValueFilter.GreaterThan -> comparePrimitive(this[filter.field], filter.value) > 0
-        is FieldValueFilter.GreaterThanOrEquals -> comparePrimitive(
-            this[filter.field],
-            filter.value
-        ) >= 0
+        is FieldValueFilter.LessThan -> compared(filter) { it < 0 }
+        is FieldValueFilter.LessThanOrEquals -> compared(filter) { it <= 0 }
+        is FieldValueFilter.GreaterThan -> compared(filter) { it > 0 }
+        is FieldValueFilter.GreaterThanOrEquals -> compared(filter) { it >= 0 }
         is FieldFilter.InList -> filter.list.contains((this[filter.field] as? RekordValue.Primitive)?.value)
         is FieldFilter.Contains -> (this[filter.field] as? RekordValue.Primitive)?.value?.toString()
             ?.contains(filter.value) == true
@@ -54,6 +48,17 @@ fun RekordValues.matches(filter: Filter): Boolean {
         is Filter.And -> filter.filters.all { matches(it) }
         is Filter.Or -> filter.filters.any { matches(it) }
     }
+}
+
+/**
+ * Whether the field [filter] ranges over holds a value [holds] the way it compares to the filter's
+ * value. A null on either side is no value to compare - nothing is less or more than it - so the
+ * rekord is not selected, as SQL selects no row there.
+ */
+private inline fun RekordValues.compared(filter: FieldValueFilter, holds: (Int) -> Boolean): Boolean {
+    val value = (this[filter.field] as? RekordValue.Primitive) ?: return false
+    val other = filter.value ?: return false
+    return holds(value.compareTo(other.asRekordValue()))
 }
 
 /** How the rekords [RekordValues] hold and [other] holds are ordered by [orderBy]. */

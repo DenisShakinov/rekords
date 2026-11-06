@@ -636,6 +636,83 @@ abstract class RekordsEditorTest(private val rekordsEditor: RekordsEditor) {
         )
     }
 
+    /**
+     * What a SQL engine tells by `instr` and three-valued logic, the others tell in memory: both
+     * have to select the same rekords - case counting, and a field holding null selected by
+     * nothing but a null it is compared to, and by every [Filter.Not].
+     */
+    open fun check_filter_text_and_null_semantics() = test {
+        suspend fun titles(filter: Filter): List<String> = rekordsStore
+            .getRekords<TestGameRekord>(filter, orderBy = listOf(Order.Ascending(TestGameRekord.ID)))
+            .getOrThrow()
+            .map { it.title }
+        val all = listOf("Doom", "Doom 2", "Silent Hill", "Silent Hill 2", "Silent Hill 3")
+        val allButDoom = listOf("Doom 2", "Silent Hill", "Silent Hill 2", "Silent Hill 3")
+        val remasteredAny = listOf("Doom", "Silent Hill")
+        val neverRemastered = listOf("Doom 2", "Silent Hill 2", "Silent Hill 3")
+        val remastered = Filter.Equals(TestGameRekord.REMASTER_DATE, LocalDate(2019, 7, 26))
+
+        // Case counts, an empty text is a part of any, and a value of no text is looked into as text.
+        assertEquals(expected = emptyList(), actual = titles(Filter.Contains(TestGameRekord.TITLE, "doom")))
+        assertEquals(expected = all, actual = titles(Filter.Contains(TestGameRekord.TITLE, "")))
+        assertEquals(expected = listOf("Silent Hill"), actual = titles(Filter.Contains(TestGameRekord.ID, "3")))
+
+        // Doom and Silent Hill are remastered: the others hold null, which no range takes in.
+        assertEquals(expected = allButDoom, actual = titles(Filter.Not(remastered)))
+        assertEquals(
+            expected = remasteredAny,
+            actual = titles(Filter.LessThan(TestGameRekord.REMASTER_DATE, LocalDate(2030, 1, 1))),
+        )
+        assertEquals(
+            expected = remasteredAny,
+            actual = titles(Filter.GreaterThanOrEquals(TestGameRekord.REMASTER_DATE, LocalDate(2000, 1, 1))),
+        )
+        assertEquals(
+            expected = neverRemastered,
+            actual = titles(Filter.Not(Filter.LessThan(TestGameRekord.REMASTER_DATE, LocalDate(2030, 1, 1)))),
+        )
+        assertEquals(expected = emptyList(), actual = titles(Filter.Not(Filter.Contains(TestGameRekord.TITLE, ""))))
+        // Nothing is less or more than null.
+        assertEquals(expected = emptyList(), actual = titles(Filter.GreaterThan(TestGameRekord.TITLE, null)))
+        assertEquals(expected = all, actual = titles(Filter.Not(Filter.LessThan(TestGameRekord.TITLE, null))))
+
+        // A null in a list selects the fields holding null.
+        assertEquals(
+            expected = neverRemastered,
+            actual = titles(Filter.InList(TestGameRekord.REMASTER_DATE, listOf(null))),
+        )
+        assertEquals(
+            expected = listOf("Doom", "Doom 2", "Silent Hill 2", "Silent Hill 3"),
+            actual = titles(Filter.InList(TestGameRekord.REMASTER_DATE, listOf(null, LocalDate(2019, 7, 26)))),
+        )
+        assertEquals(
+            expected = remasteredAny,
+            actual = titles(Filter.Not(Filter.InList(TestGameRekord.REMASTER_DATE, listOf(null)))),
+        )
+        assertEquals(
+            expected = allButDoom,
+            actual = titles(Filter.Not(Filter.InList(TestGameRekord.REMASTER_DATE, listOf(LocalDate(2019, 7, 26))))),
+        )
+        assertEquals(expected = 4, actual = rekordsStore.count<TestGameRekord>(Filter.Not(remastered)).getOrThrow())
+
+        // A % or _ is looked for as itself.
+        rekordsStore.putRekord(
+            TestGameRekord(
+                id = 6,
+                title = "100% Orange_Juice",
+                releaseDate = LocalDate(2008, 8, 15),
+                state = TestGameStateRekord(id = 2, name = "Playing"),
+                properties = emptyList(),
+            ),
+        )
+        assertEquals(expected = listOf("100% Orange_Juice"), actual = titles(Filter.Contains(TestGameRekord.TITLE, "%")))
+        assertEquals(expected = listOf("100% Orange_Juice"), actual = titles(Filter.Contains(TestGameRekord.TITLE, "_")))
+        assertEquals(expected = listOf("100% Orange_Juice"), actual = titles(Filter.Contains(TestGameRekord.TITLE, "0% O")))
+
+        rekordsStore.delete<TestGameRekord>(Filter.Not(remastered))
+        assertEquals(expected = listOf("Doom"), actual = titles(Filter.Contains(TestGameRekord.TITLE, "")))
+    }
+
     open fun check_composite_delete_parent_does_not_affect_shared_state() = test {
         // Doom (id=1) and Doom 2 (id=2) share state id=3
         rekordsStore.delete<TestGameRekord>(filter = Filter.Equals(TestGameRekord.ID, 1))

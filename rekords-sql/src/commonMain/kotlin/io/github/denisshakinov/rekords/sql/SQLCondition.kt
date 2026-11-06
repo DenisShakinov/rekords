@@ -59,17 +59,15 @@ internal class SQLConditionBuilder(
     ): String = when (filter) {
         is Filter.And -> filter.filters.joined(" AND ", whenNone = "1") { condition(it, rekordType, alias, args) }
         is Filter.Or -> filter.filters.joined(" OR ", whenNone = "0") { condition(it, rekordType, alias, args) }
-        is Filter.Not -> "(NOT ${condition(filter.filter, rekordType, alias, args)})"
+        // A condition is unknown, not false, where a column it compares is null, and NOT keeps it
+        // unknown - so it is read as false first, and NOT selects every row the condition does not.
+        is Filter.Not -> "(NOT COALESCE(${condition(filter.filter, rekordType, alias, args)}, 0))"
         is FieldFilter.Nested -> nested(filter, rekordType, alias, args)
-        is FieldFilter.InList -> if (filter.list.isEmpty()) {
-            "(0)"
-        } else {
-            args += filter.list
-            "(${column(alias, filter.field)} IN (${filter.list.joinToString(",") { "?" }}))"
-        }
+        is FieldFilter.InList -> inList(alias, filter, args)
+        // instr rather than LIKE: case counts, and a % or _ is looked for as itself.
         is FieldFilter.Contains -> {
-            args += "%${filter.value}%"
-            "(${column(alias, filter.field)} LIKE ?)"
+            args += filter.value
+            "(instr(${column(alias, filter.field)}, ?) > 0)"
         }
         is FieldFilter.Glob -> {
             args += filter.pattern
@@ -84,6 +82,29 @@ internal class SQLConditionBuilder(
         is FieldValueFilter.LessThanOrEquals -> comparison(alias, filter, "<=", args)
         is FieldValueFilter.GreaterThan -> comparison(alias, filter, ">", args)
         is FieldValueFilter.GreaterThanOrEquals -> comparison(alias, filter, ">=", args)
+    }
+
+    /**
+     * A null the list holds selects the rows whose column is null, which `IN` never does: null
+     * equals nothing there, itself included.
+     */
+    private fun inList(
+        alias: String,
+        filter: FieldFilter.InList,
+        args: MutableList<PrimitiveRekordValue?>,
+    ): String {
+        val column = column(alias, filter.field)
+        val values = filter.list.filterNotNull()
+        val conditions = buildList {
+            if (values.isNotEmpty()) {
+                args += values
+                add("$column IN (${values.joinToString(",") { "?" }})")
+            }
+            if (values.size < filter.list.size) {
+                add("$column IS NULL")
+            }
+        }
+        return "(${conditions.ifEmpty { listOf("0") }.joinToString(" OR ")})"
     }
 
     private fun comparison(

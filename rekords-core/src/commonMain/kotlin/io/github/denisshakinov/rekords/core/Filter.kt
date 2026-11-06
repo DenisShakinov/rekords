@@ -2,6 +2,13 @@
 
 package io.github.denisshakinov.rekords.core
 
+/**
+ * Which rekords an operation selects - the same ones in every engine.
+ *
+ * A field holding null is selected by [Equals] to null, and by [InList] holding null, alone:
+ * nothing is less or more than null, it contains nothing and matches no pattern. [Not] selects
+ * every rekord the filter it holds does not, those holding null included.
+ */
 sealed interface Filter {
     companion object {
         fun Equals(field: String, value: PrimitiveRekordValue?) =
@@ -22,6 +29,11 @@ sealed interface Filter {
         fun InList(field: String, list: List<PrimitiveRekordValue?>) =
             FieldFilter.InList(field, list.map { it.encode() })
 
+        /**
+         * Selects the rekords whose [field] holds [value] as a part of its text. Every character is
+         * looked for as itself - `%` and `_` included - and an empty value is a part of any text.
+         * A field holding no text is looked into as the text of its value. Case counts.
+         */
         fun Contains(field: String, value: String) = FieldFilter.Contains(field, value)
 
         /**
