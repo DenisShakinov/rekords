@@ -23,8 +23,6 @@ internal fun jsBoolean(value: Boolean): JsAny = js("value")
 /** The `typeof` of [value], which is never null here. */
 internal fun typeOf(value: JsAny): String = js("typeof value")
 
-internal fun isArray(value: JsAny): Boolean = js("Array.isArray(value)")
-
 internal fun toKotlinString(value: JsAny): String = js("value")
 
 internal fun toKotlinDouble(value: JsAny): Double = js("value")

@@ -2,7 +2,6 @@
 
 package io.github.denisshakinov.rekords.sql
 
-import io.github.denisshakinov.rekords.core.Field
 import io.github.denisshakinov.rekords.core.FieldWithType
 import io.github.denisshakinov.rekords.core.Filter
 import io.github.denisshakinov.rekords.core.InternalRekordsApi
