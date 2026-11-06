@@ -53,10 +53,16 @@ sealed interface Filter {
          * - Nothing escapes a character: `*`, `?` and `[` stand for themselves inside a set,
          *   `[*]` matching an asterisk. A set left open matches nothing.
          *
-         * Case counts. A field holding no text is matched as the text of its value; a null one
-         * matches no pattern.
+         * Case counts unless [ignoreCase] is set, and then for the Latin letters `A`-`Z` alone, as
+         * [Contains] ignores it: the text and the pattern are both lowered before they are
+         * matched, the ranges of a set included - `[A-Z]` takes in `a`-`z` as well, and a range
+         * from an upper case letter to a lower case one, `[A-z]`, is read as the lowered `[a-z]`.
+         *
+         * A field holding no text is matched as the text of its value; a null one matches no
+         * pattern.
          */
-        fun Glob(field: String, pattern: String) = FieldFilter.Glob(field, pattern)
+        fun Glob(field: String, pattern: String, ignoreCase: Boolean = false) =
+            FieldFilter.Glob(field, pattern, ignoreCase)
 
         fun Nested(field: String, filter: FieldFilter) = FieldFilter.Nested(field, filter)
 
@@ -86,7 +92,8 @@ sealed class FieldFilter(open val field: String) : Filter {
     /** See [Filter.Glob]. */
     data class Glob internal constructor(
         override val field: String,
-        val pattern: String
+        val pattern: String,
+        val ignoreCase: Boolean = false,
     ) : FieldFilter(field)
 
     data class Nested internal constructor(

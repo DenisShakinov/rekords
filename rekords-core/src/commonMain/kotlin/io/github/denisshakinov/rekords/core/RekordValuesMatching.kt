@@ -44,7 +44,13 @@ fun RekordValues.matches(filter: Filter): Boolean {
                 }
             } == true
         is FieldFilter.Glob -> (this[filter.field] as? RekordValue.Primitive)?.value?.toString()
-            ?.matchesGlob(filter.pattern) == true
+            ?.let { text ->
+                if (filter.ignoreCase) {
+                    text.asciiLowercase().matchesGlob(filter.pattern.asciiLowercase())
+                } else {
+                    text.matchesGlob(filter.pattern)
+                }
+            } == true
         is FieldFilter.Nested -> when (val composite = this[filter.field]) {
             is RekordValue.Composite -> composite.values.matches(filter.filter)
             is RekordValue.CompositeList -> composite.list.any { it.values.matches(filter.filter) }

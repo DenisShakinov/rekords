@@ -71,9 +71,11 @@ internal class SQLConditionBuilder(
             val column = column(alias, filter.field)
             if (filter.ignoreCase) "(instr(lower($column), lower(?)) > 0)" else "(instr($column, ?) > 0)"
         }
+        // Ignoring case, the text and the pattern are lowered alike, the way a Contains is.
         is FieldFilter.Glob -> {
             args += filter.pattern
-            "(${column(alias, filter.field)} GLOB ?)"
+            val column = column(alias, filter.field)
+            if (filter.ignoreCase) "(lower($column) GLOB lower(?))" else "($column GLOB ?)"
         }
         is FieldValueFilter.Equals -> if (filter.value == null) {
             "(${column(alias, filter.field)} IS NULL)"

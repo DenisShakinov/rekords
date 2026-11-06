@@ -772,6 +772,68 @@ abstract class RekordsEditorTest(private val rekordsEditor: RekordsEditor) {
         )
     }
 
+    /**
+     * Ignoring case, a glob lowers `A`-`Z` alone in the text and the pattern both, its sets
+     * included - the way SQL lowers them before its `GLOB`, and the in-memory match alike.
+     */
+    open fun check_filter_by_glob_ignoring_case() = test {
+        suspend fun titles(filter: Filter): List<String> = rekordsStore
+            .getRekords<TestGameRekord>(filter, orderBy = listOf(Order.Ascending(TestGameRekord.ID)))
+            .getOrThrow()
+            .map { it.title }
+        val silentHills = listOf("Silent Hill", "Silent Hill 2", "Silent Hill 3")
+
+        assertEquals(
+            expected = listOf("Doom", "Doom 2"),
+            actual = titles(Filter.Glob(TestGameRekord.TITLE, "doom*", ignoreCase = true)),
+        )
+        assertEquals(
+            expected = listOf("Silent Hill 2", "Silent Hill 3"),
+            actual = titles(Filter.Glob(TestGameRekord.TITLE, "SILENT HILL ?", ignoreCase = true)),
+        )
+        // A set is lowered too: [S] takes in s, [^A-Z] keeps out every letter of either case.
+        assertEquals(expected = silentHills, actual = titles(Filter.Glob(TestGameRekord.TITLE, "[S]ilent*", ignoreCase = true)))
+        assertEquals(
+            expected = listOf("Doom 2", "Silent Hill 2", "Silent Hill 3"),
+            actual = titles(Filter.Glob(TestGameRekord.TITLE, "*[^A-Z]", ignoreCase = true)),
+        )
+        // Case still counts without it.
+        assertEquals(expected = emptyList(), actual = titles(Filter.Glob(TestGameRekord.TITLE, "doom*")))
+        assertEquals(
+            expected = silentHills,
+            actual = titles(Filter.Not(Filter.Glob(TestGameRekord.TITLE, "DOOM*", ignoreCase = true))),
+        )
+        assertEquals(
+            expected = 3,
+            actual = rekordsStore
+                .count<TestGameRekord>(Filter.Glob(TestGameRekord.TITLE, "*HILL*", ignoreCase = true))
+                .getOrThrow(),
+        )
+
+        rekordsStore.putRekord(
+            TestGameRekord(
+                id = 6,
+                title = "Дум ÉPOQUE",
+                releaseDate = LocalDate(1993, 12, 10),
+                state = TestGameStateRekord(id = 2, name = "Playing"),
+                properties = emptyList(),
+            ),
+        )
+        // A letter outside A-Z keeps its case.
+        assertEquals(expected = emptyList(), actual = titles(Filter.Glob(TestGameRekord.TITLE, "дум*", ignoreCase = true)))
+        assertEquals(expected = emptyList(), actual = titles(Filter.Glob(TestGameRekord.TITLE, "*époque", ignoreCase = true)))
+        assertEquals(
+            expected = listOf("Дум ÉPOQUE"),
+            actual = titles(Filter.Glob(TestGameRekord.TITLE, "Дум Époque", ignoreCase = true)),
+        )
+
+        rekordsStore.delete<TestGameRekord>(Filter.Glob(TestGameRekord.TITLE, "silent*", ignoreCase = true))
+        assertEquals(
+            expected = listOf("Doom", "Doom 2", "Дум ÉPOQUE"),
+            actual = titles(Filter.Glob(TestGameRekord.TITLE, "*")),
+        )
+    }
+
     open fun check_composite_delete_parent_does_not_affect_shared_state() = test {
         // Doom (id=1) and Doom 2 (id=2) share state id=3
         rekordsStore.delete<TestGameRekord>(filter = Filter.Equals(TestGameRekord.ID, 1))

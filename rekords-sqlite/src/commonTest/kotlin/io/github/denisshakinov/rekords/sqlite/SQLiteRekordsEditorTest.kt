@@ -255,6 +255,9 @@ abstract class SQLiteRekordsEditorTest(private val rekordsEditor: RekordsEditor)
     override fun check_filter_by_glob() = super.check_filter_by_glob()
 
     @Test
+    override fun check_filter_by_glob_ignoring_case() = super.check_filter_by_glob_ignoring_case()
+
+    @Test
     override fun check_filter_text_and_null_semantics() = super.check_filter_text_and_null_semantics()
 
     @Test

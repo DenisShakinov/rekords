@@ -268,9 +268,15 @@ both:
 Filter.Glob(NoteRekord.TITLE, "Draft [0-9]*")
 ```
 
-`Filter.Contains(field, value, ignoreCase = true)` ignores the case of the Latin letters `A`–`Z`
-alone: SQLite tells no other letter's case without ICU, so no engine does — `"doom"` finds `"Doom"`,
-while `"дум"` does not find `"Дум"`.
+Either ignores the case of the Latin letters `A`–`Z` alone with `ignoreCase = true`: SQLite tells no
+other letter's case without ICU, so no engine does — `"doom"` finds `"Doom"`, while `"дум"` does not
+find `"Дум"`. A glob's pattern is lowered along with the text, its sets included, so `[A-Z]` takes
+in `a`–`z` as well:
+
+```kotlin
+Filter.Contains(NoteRekord.TITLE, "draft", ignoreCase = true)
+Filter.Glob(NoteRekord.TITLE, "release [0-9]*", ignoreCase = true)
+```
 
 A field holding null is selected by `Filter.Equals` to null and by `Filter.InList` holding null
 alone — nothing is less or more than null, it contains nothing and matches no pattern. `Filter.Not`
