@@ -16,7 +16,7 @@ private const val REPOSITORY = "github.com/DenisShakinov/rekords"
 internal fun Project.configurePublishing(description: String) {
     pluginManager.apply("com.vanniktech.maven.publish")
     extensions.configure<MavenPublishBaseExtension> {
-        publishToMavenCentral()
+        publishToMavenCentral(automaticRelease = true)
         // Central takes no unsigned release, while a snapshot published to Maven Local for a try
         // should not need the key.
         if (!version.toString().endsWith("-SNAPSHOT")) {
