@@ -281,14 +281,14 @@ private fun SerialDescriptor.getPlainFieldType(index: Int): KType {
     val isNullable: Boolean = elementDescriptor.isNullable
     return when {
         // Long, which is what a date is encoded as: the days since the epoch, as toEpochDays() counts them.
-        serialName.isClass(LocalDate::class) -> if (isNullable) typeOf<Long?>() else typeOf<Long>()
-        serialName.isClass(LocalDateTime::class) -> if (isNullable) typeOf<Long?>() else typeOf<Long>()
-        serialName.isClass(Int::class) -> if (isNullable) typeOf<Int?>() else typeOf<Int>()
-        serialName.isClass(Long::class) -> if (isNullable) typeOf<Long?>() else typeOf<Long>()
-        serialName.isClass(Float::class) -> if (isNullable) typeOf<Float?>() else typeOf<Float>()
-        serialName.isClass(Double::class) -> if (isNullable) typeOf<Double?>() else typeOf<Double>()
-        serialName.isClass(Boolean::class) -> if (isNullable) typeOf<Boolean?>() else typeOf<Boolean>()
-        serialName.isClass(String::class) -> if (isNullable) typeOf<String?>() else typeOf<String>()
+        serialName.isClass("LocalDate") -> if (isNullable) typeOf<Long?>() else typeOf<Long>()
+        serialName.isClass("LocalDateTime") -> if (isNullable) typeOf<Long?>() else typeOf<Long>()
+        serialName.isClass("Int") -> if (isNullable) typeOf<Int?>() else typeOf<Int>()
+        serialName.isClass("Long") -> if (isNullable) typeOf<Long?>() else typeOf<Long>()
+        serialName.isClass("Float") -> if (isNullable) typeOf<Float?>() else typeOf<Float>()
+        serialName.isClass("Double") -> if (isNullable) typeOf<Double?>() else typeOf<Double>()
+        serialName.isClass("Boolean") -> if (isNullable) typeOf<Boolean?>() else typeOf<Boolean>()
+        serialName.isClass("String") -> if (isNullable) typeOf<String?>() else typeOf<String>()
         elementDescriptor.annotations.any { it is Rekord } ->
             RekordKType(elementDescriptor, isMarkedNullable = isNullable)
         elementDescriptor.kind == StructureKind.LIST -> {
@@ -355,11 +355,13 @@ class EncryptedKType(
 }
 
 /**
- * Whether this serial name is [clazz], nullable or not: a nullable element's serial name carries
- * a trailing "?", and missing it means a value is stored in one shape and looked up in another.
+ * Whether this serial name is of the class named [simpleName], nullable or not: a nullable
+ * element's serial name carries a trailing "?", and missing it means a value is stored in one shape
+ * and looked up in another. The name is given as text, not taken from the class: R8 renames the
+ * classes of an app it minifies, `KClass.simpleName` with them.
  */
-private fun String.isClass(clazz: KClass<*>): Boolean {
-    return endsWith(clazz.simpleName.orEmpty()) || endsWith("${clazz.simpleName}?")
+private fun String.isClass(simpleName: String): Boolean {
+    return endsWith(simpleName) || endsWith("$simpleName?")
 }
 
 /**
@@ -451,8 +453,8 @@ internal class RekordValuesEncoder(
         val elementDescriptor: SerialDescriptor = descriptor.getElementDescriptor(elementIndex)
         val serialName: String = elementDescriptor.serialName
         val encoded: PrimitiveRekordValue = when {
-            serialName.isClass(LocalDate::class) -> LocalDate.parse(value).encode()!!
-            serialName.isClass(LocalDateTime::class) -> LocalDateTime.parse(value).encode()!!
+            serialName.isClass("LocalDate") -> LocalDate.parse(value).encode()!!
+            serialName.isClass("LocalDateTime") -> LocalDateTime.parse(value).encode()!!
             else -> value
         }
         values[elementName] = encoded.asRekordValue()
@@ -613,11 +615,11 @@ private fun RekordValue.Composite.coerced(descriptor: SerialDescriptor): RekordV
 private fun PrimitiveRekordValue.coercedTo(serialName: String): PrimitiveRekordValue? {
     if (this !is Number) return null
     return when {
-        serialName.isClass(LocalDate::class) -> toLong().toLocalDate().toString()
-        serialName.isClass(LocalDateTime::class) -> toLong().toLocalDateTime().toString()
-        serialName.isClass(Int::class) -> toInt()
-        serialName.isClass(Float::class) -> toFloat()
-        serialName.isClass(Boolean::class) -> this == 1 || this == 1L
+        serialName.isClass("LocalDate") -> toLong().toLocalDate().toString()
+        serialName.isClass("LocalDateTime") -> toLong().toLocalDateTime().toString()
+        serialName.isClass("Int") -> toInt()
+        serialName.isClass("Float") -> toFloat()
+        serialName.isClass("Boolean") -> this == 1 || this == 1L
         else -> null
     }
 }

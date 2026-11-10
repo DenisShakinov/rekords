@@ -18,6 +18,11 @@ rekords {
 kotlin {
     android {
         withHostTest {}
+        // Shipped in the AAR, for the apps minified by R8: see the file.
+        optimization {
+            consumerKeepRules.publish = true
+            consumerKeepRules.file("consumer-rules.pro")
+        }
     }
     sourceSets {
         commonMain.dependencies {
