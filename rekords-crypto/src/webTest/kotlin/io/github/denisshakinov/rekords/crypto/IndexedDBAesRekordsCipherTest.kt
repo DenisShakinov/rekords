@@ -26,6 +26,9 @@ class IndexedDBAesRekordsCipherTest : RekordsEncryptionTest(
     override fun check_nested_encrypted_fields_are_selected_by_equality() = super.check_nested_encrypted_fields_are_selected_by_equality()
 
     @Test
+    override fun check_deterministic_fields_tell_rekords_apart() = super.check_deterministic_fields_tell_rekords_apart()
+
+    @Test
     override fun check_randomized_fields_are_selected_by_null() = super.check_randomized_fields_are_selected_by_null()
 
     @Test

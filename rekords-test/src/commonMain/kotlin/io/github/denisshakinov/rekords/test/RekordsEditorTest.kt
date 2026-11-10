@@ -8,6 +8,7 @@ import io.github.denisshakinov.rekords.core.Order
 import io.github.denisshakinov.rekords.core.RekordsEditor
 import io.github.denisshakinov.rekords.core.RekordsSchema
 import io.github.denisshakinov.rekords.core.RekordsStore
+import io.github.denisshakinov.rekords.core.RekordValues
 import io.github.denisshakinov.rekords.core.asRekordValue
 import io.github.denisshakinov.rekords.core.count
 import io.github.denisshakinov.rekords.core.delete
@@ -443,6 +444,131 @@ abstract class RekordsEditorTest(private val rekordsEditor: RekordsEditor) {
             .count<TestGameRekord>(filter = Filter.Contains(TestGameRekord.TITLE, "Doom"))
             .getOrDefault(0)
         assertEquals(expected = 2, actual = count2)
+    }
+
+    /**
+     * Counted by the values of fields: the states, rekords held, are told apart by their ids; a
+     * null is a value as any other; none counts the rekords themselves.
+     */
+    open fun check_RekordsStore_count_method_with_distinctBy() = test {
+        val states: Int = rekordsStore
+            .count<TestGameRekord>(distinctBy = listOf(TestGameRekord.STATE))
+            .getOrThrow()
+        assertEquals(expected = 3, actual = states)
+        val doomStates: Int = rekordsStore
+            .count<TestGameRekord>(
+                filter = Filter.Contains(TestGameRekord.TITLE, "Doom"),
+                distinctBy = listOf(TestGameRekord.STATE),
+            )
+            .getOrThrow()
+        assertEquals(expected = 1, actual = doomStates)
+        // 2019, 2024 and none.
+        val remasterDates: Int = rekordsStore
+            .count<TestGameRekord>(distinctBy = listOf(TestGameRekord.REMASTER_DATE))
+            .getOrThrow()
+        assertEquals(expected = 3, actual = remasterDates)
+        val statesAndRemasterDates: Int = rekordsStore
+            .count<TestGameRekord>(distinctBy = listOf(TestGameRekord.STATE, TestGameRekord.REMASTER_DATE))
+            .getOrThrow()
+        assertEquals(expected = 5, actual = statesAndRemasterDates)
+        val all: Int = rekordsStore.count<TestGameRekord>(distinctBy = emptyList()).getOrThrow()
+        assertEquals(expected = 5, actual = all)
+    }
+
+    /** One rekord for each state, the first in the order asked for, paged after that. */
+    open fun check_RekordsStore_query_method_with_distinctBy() = test {
+        val latest: List<TestGameRekord> = rekordsStore
+            .getRekords<TestGameRekord>(
+                orderBy = listOf(Order.Descending(TestGameRekord.RELEASE_DATE)),
+                distinctBy = listOf(TestGameRekord.STATE),
+            )
+            .getOrThrow()
+        assertEquals(expected = listOf("Silent Hill 3", "Silent Hill 2", "Silent Hill"), actual = latest.map { it.title })
+        val earliest: List<TestGameRekord> = rekordsStore
+            .getRekords<TestGameRekord>(
+                orderBy = listOf(Order.Ascending(TestGameRekord.RELEASE_DATE)),
+                distinctBy = listOf(TestGameRekord.STATE),
+            )
+            .getOrThrow()
+        assertEquals(expected = listOf("Doom", "Silent Hill 2", "Silent Hill 3"), actual = earliest.map { it.title })
+        val paged: List<TestGameRekord> = rekordsStore
+            .getRekords<TestGameRekord>(
+                orderBy = listOf(Order.Descending(TestGameRekord.RELEASE_DATE)),
+                limit = 1,
+                offset = 1,
+                distinctBy = listOf(TestGameRekord.STATE),
+            )
+            .getOrThrow()
+        assertEquals(expected = listOf("Silent Hill 2"), actual = paged.map { it.title })
+        val values: List<RekordValues> = rekordsStore
+            .query<TestGameRekord>(
+                fields = listOf(TestGameRekord.TITLE),
+                orderBy = listOf(Order.Descending(TestGameRekord.RELEASE_DATE)),
+                distinctBy = listOf(TestGameRekord.FINISHED),
+            )
+            .getOrThrow()
+        assertEquals(expected = listOf("Silent Hill 3".asRekordValue()), actual = values.map { it[TestGameRekord.TITLE] })
+    }
+
+    /**
+     * The first of each state by a field some rekords have no value in: none comes first in an
+     * ascending order and last in a descending one, as with no distinctBy.
+     */
+    open fun check_RekordsStore_query_method_with_distinctBy_and_nulls() = test {
+        val remasteredLast: List<TestGameRekord> = rekordsStore
+            .getRekords<TestGameRekord>(
+                orderBy = listOf(
+                    Order.Descending(TestGameRekord.REMASTER_DATE),
+                    Order.Descending(TestGameRekord.RELEASE_DATE),
+                ),
+                distinctBy = listOf(TestGameRekord.STATE),
+            )
+            .getOrThrow()
+        assertEquals(expected = listOf("Silent Hill", "Silent Hill 3", "Silent Hill 2"), actual = remasteredLast.map { it.title })
+        val unremasteredFirst: List<TestGameRekord> = rekordsStore
+            .getRekords<TestGameRekord>(
+                orderBy = listOf(
+                    Order.Ascending(TestGameRekord.REMASTER_DATE),
+                    Order.Ascending(TestGameRekord.RELEASE_DATE),
+                ),
+                distinctBy = listOf(TestGameRekord.STATE),
+            )
+            .getOrThrow()
+        assertEquals(expected = listOf("Doom 2", "Silent Hill 2", "Silent Hill 3"), actual = unremasteredFirst.map { it.title })
+    }
+
+    /** A rekord the filter leaves out is not the first of its state, even when it would come first. */
+    open fun check_RekordsStore_query_method_with_distinctBy_and_filter() = test {
+        val games: List<TestGameRekord> = rekordsStore
+            .getRekords<TestGameRekord>(
+                filter = Filter.Not(Filter.Equals(TestGameRekord.TITLE, "Silent Hill")),
+                orderBy = listOf(
+                    Order.Descending(TestGameRekord.REMASTER_DATE),
+                    Order.Descending(TestGameRekord.RELEASE_DATE),
+                ),
+                distinctBy = listOf(TestGameRekord.STATE),
+            )
+            .getOrThrow()
+        assertEquals(expected = listOf("Doom", "Silent Hill 3", "Silent Hill 2"), actual = games.map { it.title })
+        // A filter looking into a rekord held, which the storage may answer by reading another table.
+        val completed: List<TestGameRekord> = rekordsStore
+            .getRekords<TestGameRekord>(
+                filter = Filter.Nested(TestGameRekord.STATE, Filter.Equals(TestGameStateRekord.NAME, "Completed")),
+                orderBy = listOf(Order.Descending(TestGameRekord.RELEASE_DATE)),
+                distinctBy = listOf(TestGameRekord.FINISHED),
+            )
+            .getOrThrow()
+        assertEquals(expected = listOf("Silent Hill"), actual = completed.map { it.title })
+    }
+
+    /** A list of rekords tells nothing apart. */
+    open fun check_RekordsStore_distinctBy_a_list_fails() = test {
+        assertTrue(
+            rekordsStore.count<TestGameRekord>(distinctBy = listOf(TestGameRekord.PROPERTIES)).isFailure,
+        )
+        assertTrue(
+            rekordsStore.getRekords<TestGameRekord>(distinctBy = listOf(TestGameRekord.PROPERTIES)).isFailure,
+        )
     }
 
     open fun check_composite_state_is_read_correctly() = test {

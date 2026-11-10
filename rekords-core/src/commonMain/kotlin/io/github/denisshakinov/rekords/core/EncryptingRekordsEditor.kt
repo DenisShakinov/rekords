@@ -43,21 +43,39 @@ internal class EncryptingRekordsEditor(
         orderBy: List<Order>?,
         limit: Int?,
         offset: Int?,
+        distinctBy: List<String>?,
     ): List<RekordValues> {
         orderBy?.forEach { order ->
             require(fieldType(rekordType, order.field) !is EncryptedKType) {
                 "${order.field} of $rekordType is encrypted, so rekords cannot be ordered by it"
             }
         }
+        requireDistinguishable(rekordType, distinctBy)
         val encryptedFilter = filter?.encrypted(rekordType)
         return runOnEditor(editor) {
-            query(rekordType, fields, encryptedFilter, orderBy, limit, offset)
+            query(rekordType, fields, encryptedFilter, orderBy, limit, offset, distinctBy)
         }.map { it.decrypted(rekordType) }
     }
 
-    override suspend fun count(rekordType: String, filter: Filter?): Int {
+    override suspend fun count(rekordType: String, filter: Filter?, distinctBy: List<String>?): Int {
+        requireDistinguishable(rekordType, distinctBy)
         val encryptedFilter = filter?.encrypted(rekordType)
-        return runOnEditor(editor) { count(rekordType, encryptedFilter) }
+        return runOnEditor(editor) { count(rekordType, encryptedFilter, distinctBy) }
+    }
+
+    /**
+     * Fails for a field of [distinctBy] encrypted Randomized: the same value is stored as another
+     * each time it is written, so what is stored does not tell the same values apart from others.
+     * One encrypted Deterministic is told apart as it is compared to a value, by what is stored.
+     */
+    private fun requireDistinguishable(rekordType: String, distinctBy: List<String>?) {
+        distinctBy?.forEach { field ->
+            val type = fieldType(rekordType, field)
+            require(type !is EncryptedKType || type.encryption == Encryption.Deterministic) {
+                "$field of $rekordType is encrypted Randomized, so rekords cannot be told apart by " +
+                    "it. Encrypt it Deterministic to tell them apart by it."
+            }
+        }
     }
 
     /** Runs [action] on the editor of [editor]'s transaction, encrypting what it does too. */

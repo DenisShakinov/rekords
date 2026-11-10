@@ -57,6 +57,11 @@ interface RekordsEditor : AutoCloseable {
      * Passing null will use the default sort order, which may be unordered.
      * @param limit limits the number of rekords returned by the query.
      * @param offset specifies the starting index.
+     * @param distinctBy the fields of which each set of values is read in one rekord alone: the
+     * first of the rekords holding it, in the order of [orderBy] - which of those equal in it is
+     * the storage's own business. [limit] and [offset] count the rekords so read. A field holding
+     * a rekord tells rekords apart by the ids of that rekord; a field holding a list of rekords, or
+     * one encrypted Randomized, cannot. Null, or none, reads every rekord.
      * @return the list of matching rekords as [RekordValues].
      */
     suspend fun query(
@@ -66,6 +71,7 @@ interface RekordsEditor : AutoCloseable {
         orderBy: List<Order>? = null,
         limit: Int? = null,
         offset: Int? = null,
+        distinctBy: List<String>? = null,
     ): List<RekordValues>
 
     /**
@@ -73,9 +79,16 @@ interface RekordsEditor : AutoCloseable {
      *
      * @param rekordType the rekord type name to count rekords of specified type.
      * @param filter filters which rekords to count. Passing null will count all rekords.
+     * @param distinctBy the fields whose sets of values are counted instead of the rekords: the
+     * rekords holding the same values in all of them count once, as [query] reads them with the
+     * same fields. Null, or none, counts every rekord.
      * @return the number of matching rekords.
      */
-    suspend fun count(rekordType: String, filter: Filter? = null): Int
+    suspend fun count(
+        rekordType: String,
+        filter: Filter? = null,
+        distinctBy: List<String>? = null,
+    ): Int
 
     /**
      * Runs [action] as one transaction, and is what every implementation has to answer the same
@@ -181,7 +194,8 @@ suspend inline fun <reified R> RekordsEditor.query(
     orderBy: List<Order>? = null,
     limit: Int? = null,
     offset: Int? = null,
-): List<RekordValues> = query(rekordType<R>(), fields, filter, orderBy, limit, offset)
+    distinctBy: List<String>? = null,
+): List<RekordValues> = query(rekordType<R>(), fields, filter, orderBy, limit, offset, distinctBy)
 
 suspend inline fun <reified R> RekordsEditor.getRekord(filter: Filter): R? =
     query<R>(
@@ -189,20 +203,26 @@ suspend inline fun <reified R> RekordsEditor.getRekord(filter: Filter): R? =
         limit = 1,
     ).firstOrNull()?.decode<R>()
 
+/** The rekords of [R] [filter] selects, read as [RekordsEditor.query] reads them. */
 suspend inline fun <reified R> RekordsEditor.getRekords(
     filter: Filter? = null,
     orderBy: List<Order>? = null,
     limit: Int? = null,
     offset: Int? = null,
+    distinctBy: List<String>? = null,
 ): List<R> = query<R>(
     filter = filter,
     orderBy = orderBy,
     limit = limit,
     offset = offset,
+    distinctBy = distinctBy,
 ).map { it.decode() }
 
-suspend inline fun <reified R> RekordsEditor.count(filter: Filter? = null): Int =
-    count(rekordType<R>(), filter)
+/** The number of rekords of [R] [filter] selects, counted as [RekordsEditor.count] counts them. */
+suspend inline fun <reified R> RekordsEditor.count(
+    filter: Filter? = null,
+    distinctBy: List<String>? = null,
+): Int = count(rekordType<R>(), filter, distinctBy)
 
 /**
  * The filter selecting the rekord [values] are of, by the id fields among [fields]. An id holding a

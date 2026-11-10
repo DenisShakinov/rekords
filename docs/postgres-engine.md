@@ -43,6 +43,7 @@ JVM target with a driver of its own.
 | `SQLConnection.insertOrIgnore` | `INSERT OR IGNORE` | `INSERT … ON CONFLICT DO NOTHING` |
 | `SQLConnection.select` | `LIMIT -1 OFFSET n` for an offset alone | `OFFSET n` |
 | `SQLRekordsEditor.INSERTION_ORDER` | lists are read back in `rowid` order of their junction rows | No `rowid`: a junction table needs a position column of its own, written in the order of the list. |
+| `SQLRekordsEditor.firstOfEachCondition` (`distinctBy`) | the first row of each set of values by `NOT EXISTS` an earlier one: `IS` compares values null or not, `rowid` breaks ties | `IS NOT DISTINCT FROM` for `IS`; no `rowid`: the ids break ties. `DISTINCT ON` does it in one, ordered by the fields first. |
 | `SQLRekordsSchemaEditor.enableFullText` | rows found by `rowid` | rows found by their ids, or one `UPDATE … FROM` |
 | `SQLRekordsSchemaEditor.recreateTable` | a table is rebuilt to drop, rename or add a `NOT NULL` column | `ALTER TABLE … DROP / RENAME COLUMN`, `ADD COLUMN … NOT NULL DEFAULT` and dropping the default after. Indexes follow by themselves. |
 | `SQLCondition`: `whenNone`, empty `InList`, `NOT COALESCE(…, 0)` | `1` and `0` are booleans | `TRUE` / `FALSE`, `COALESCE(…, FALSE)` |

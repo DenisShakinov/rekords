@@ -170,6 +170,26 @@ abstract class RekordsEncryptionTest(
         assertEquals(listOf(3L), ids(pinnedWork))
     }
 
+    /**
+     * A field encrypted Deterministic tells rekords apart, its same values being the same
+     * ciphertext; one encrypted Randomized cannot.
+     */
+    open fun check_deterministic_fields_tell_rekords_apart() = test {
+        assertEquals(
+            2,
+            rekordsStore.count<TestSecretRekord>(distinctBy = listOf(TestSecretRekord.OWNER)).getOrThrow(),
+        )
+        val owners = rekordsStore
+            .getRekords<TestSecretRekord>(
+                orderBy = listOf(Order.Ascending(TestSecretRekord.CATEGORY)),
+                distinctBy = listOf(TestSecretRekord.OWNER),
+            )
+            .getOrThrow()
+        assertEquals(listOf("alice", "bob"), owners.map { it.owner }.sorted())
+        assertTrue(rekordsStore.count<TestSecretRekord>(distinctBy = listOf(TestSecretRekord.NOTE)).isFailure)
+        assertTrue(rekordsStore.getRekords<TestSecretRekord>(distinctBy = listOf(TestSecretRekord.NOTE)).isFailure)
+    }
+
     open fun check_randomized_fields_are_selected_by_null() = test {
         assertEquals(listOf(3L), ids(Filter.Equals(TestSecretRekord.NOTE, null)))
     }

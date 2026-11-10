@@ -126,6 +126,21 @@ internal suspend fun SQLConnection.count(tableName: String, condition: SQLCondit
         condition = condition,
     ).firstIntValue() ?: 0
 
+/** The number of the sets of values [columnNames] hold in the rows [condition] selects. */
+internal suspend fun SQLConnection.countDistinct(
+    tableName: String,
+    columnNames: List<String>,
+    condition: SQLCondition?,
+): Int {
+    val queryBuilder = StringBuilder()
+    queryBuilder.append("SELECT COUNT(*) FROM (SELECT DISTINCT ")
+    queryBuilder.append(columnNames.joinToString(listSeparator))
+    queryBuilder.append(" FROM $tableName")
+    if (condition != null) queryBuilder.append(" WHERE ${condition.sql}")
+    queryBuilder.append(")")
+    return rawQuery(query = queryBuilder.toString(), args = condition?.args).firstIntValue() ?: 0
+}
+
 private fun List<Order>.toSqlOrderByString(): String =
     joinToString(listSeparator) { order -> order.toSqlString() }
 

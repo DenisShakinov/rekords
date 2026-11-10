@@ -10,6 +10,8 @@ import io.github.denisshakinov.rekords.core.FieldFilter
 import io.github.denisshakinov.rekords.core.FieldWithType
 import io.github.denisshakinov.rekords.core.Filter
 import io.github.denisshakinov.rekords.core.InternalRekordsApi
+import io.github.denisshakinov.rekords.core.idPaths
+import io.github.denisshakinov.rekords.core.distinctRekords
 import io.github.denisshakinov.rekords.core.Order
 import io.github.denisshakinov.rekords.core.PrimitiveRekordValue
 import io.github.denisshakinov.rekords.core.RekordKType
@@ -97,10 +99,14 @@ internal class RekordsSession(
         orderBy: List<Order>?,
         limit: Int?,
         offset: Int?,
+        distinctBy: List<String>?,
     ): List<RekordValues> {
         var found: List<RekordValues> = select(rekordType, filter, readComposites = true).map { it.values }
         if (orderBy != null) {
             found = found.sortedWith { values1, values2 -> values1.compareTo(values2, orderBy) }
+        }
+        if (!distinctBy.isNullOrEmpty()) {
+            found = found.distinctRekords(distinctBy, ::idPaths)
         }
         if (offset != null) {
             found = found.drop(offset)
@@ -111,12 +117,22 @@ internal class RekordsSession(
         return found
     }
 
-    suspend fun count(rekordType: String, filter: Filter?): Int {
+    suspend fun count(rekordType: String, filter: Filter?, distinctBy: List<String>?): Int {
+        if (!distinctBy.isNullOrEmpty()) {
+            // The rekords held are read back to be told apart by their ids, as a query reads them.
+            return select(rekordType, filter, readComposites = true)
+                .map { it.values }
+                .distinctRekords(distinctBy, ::idPaths)
+                .size
+        }
         if (filter == null) {
             return with(transaction) { rekords.count(typeRange(rekordType)) }
         }
         return select(rekordType, filter).size
     }
+
+    /** The ids of [rekordType], as the schema declares them: none for a type it does not. */
+    private fun idPaths(rekordType: String): List<List<String>> = schema(rekordType).values.idPaths()
 
     suspend fun version(): Int =
         with(transaction) { meta.get(Key(jsString(VERSION_KEY))) }?.let { toKotlinDouble(it).toInt() } ?: 0

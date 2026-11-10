@@ -222,6 +222,21 @@ abstract class SQLiteRekordsEditorTest(private val rekordsEditor: RekordsEditor)
     override fun check_RekordsStore_count_method() = super.check_RekordsStore_count_method()
 
     @Test
+    override fun check_RekordsStore_count_method_with_distinctBy() = super.check_RekordsStore_count_method_with_distinctBy()
+
+    @Test
+    override fun check_RekordsStore_query_method_with_distinctBy() = super.check_RekordsStore_query_method_with_distinctBy()
+
+    @Test
+    override fun check_RekordsStore_query_method_with_distinctBy_and_nulls() = super.check_RekordsStore_query_method_with_distinctBy_and_nulls()
+
+    @Test
+    override fun check_RekordsStore_query_method_with_distinctBy_and_filter() = super.check_RekordsStore_query_method_with_distinctBy_and_filter()
+
+    @Test
+    override fun check_RekordsStore_distinctBy_a_list_fails() = super.check_RekordsStore_distinctBy_a_list_fails()
+
+    @Test
     override fun check_composite_state_is_read_correctly() =
         super.check_composite_state_is_read_correctly()
 

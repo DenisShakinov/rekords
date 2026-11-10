@@ -68,10 +68,11 @@ class IndexedDBRekordsEditor(
         orderBy: List<Order>?,
         limit: Int?,
         offset: Int?,
-    ): List<RekordValues> = connection.session { query(rekordType, filter, orderBy, limit, offset) }
+        distinctBy: List<String>?,
+    ): List<RekordValues> = connection.session { query(rekordType, filter, orderBy, limit, offset, distinctBy) }
 
-    override suspend fun count(rekordType: String, filter: Filter?): Int =
-        connection.session { count(rekordType, filter) }
+    override suspend fun count(rekordType: String, filter: Filter?, distinctBy: List<String>?): Int =
+        connection.session { count(rekordType, filter, distinctBy) }
 
     /**
      * The fields of [rekordType]. Only a store sets a schema, so an editor reached on its own has

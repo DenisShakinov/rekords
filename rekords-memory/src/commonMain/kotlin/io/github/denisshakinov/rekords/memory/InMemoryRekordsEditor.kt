@@ -5,6 +5,7 @@ package io.github.denisshakinov.rekords.memory
 import io.github.denisshakinov.rekords.core.FieldWithType
 import io.github.denisshakinov.rekords.core.Filter
 import io.github.denisshakinov.rekords.core.InternalRekordsApi
+import io.github.denisshakinov.rekords.core.distinctRekords
 import io.github.denisshakinov.rekords.core.MutableRekordValues
 import io.github.denisshakinov.rekords.core.Order
 import io.github.denisshakinov.rekords.core.PrimitiveRekordValue
@@ -231,12 +232,16 @@ class InMemoryRekordsEditor : RekordsEditor {
         orderBy: List<Order>?,
         limit: Int?,
         offset: Int?,
+        distinctBy: List<String>?,
     ): List<RekordValues> {
         var rekords: List<RekordValues> = table(rekordType).select(filter)
         if (orderBy != null) {
             rekords = rekords.sortedWith { values1: RekordValues, values2: RekordValues ->
                 values1.compareTo(values2, orderBy)
             }
+        }
+        if (!distinctBy.isNullOrEmpty()) {
+            rekords = rekords.distinctRekords(distinctBy) { type -> table(type).idPaths }
         }
         if (offset != null) {
             rekords = rekords.drop(offset)
@@ -247,8 +252,12 @@ class InMemoryRekordsEditor : RekordsEditor {
         return rekords
     }
 
-    override suspend fun count(rekordType: String, filter: Filter?): Int =
-        table(rekordType).count(filter)
+    override suspend fun count(rekordType: String, filter: Filter?, distinctBy: List<String>?): Int =
+        if (distinctBy.isNullOrEmpty()) {
+            table(rekordType).count(filter)
+        } else {
+            table(rekordType).select(filter).distinctRekords(distinctBy) { type -> table(type).idPaths }.size
+        }
 }
 
 /**

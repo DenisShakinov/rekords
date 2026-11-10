@@ -183,8 +183,13 @@ class SQLRekordsEditor(
         orderBy: List<Order>?,
         limit: Int?,
         offset: Int?,
+        distinctBy: List<String>?,
     ): List<RekordValues> {
-        val condition = filter?.toCondition(rekordType)
+        val condition = if (distinctBy.isNullOrEmpty()) {
+            filter?.toCondition(rekordType)
+        } else {
+            firstOfEachCondition(rekordType, filter, orderBy, distinctColumns(rekordType, distinctBy))
+        }
         if (rekordSchema(rekordType).isEmpty()) {
             // A table of no rekord type the schema declares is read as the rows it holds.
             return connection()
@@ -311,8 +316,75 @@ class SQLRekordsEditor(
             else -> value
         }
 
-    override suspend fun count(rekordType: String, filter: Filter?): Int =
-        connection().count(rekordType, filter?.toCondition(rekordType))
+    override suspend fun count(rekordType: String, filter: Filter?, distinctBy: List<String>?): Int {
+        val condition = filter?.toCondition(rekordType)
+        return if (distinctBy.isNullOrEmpty()) {
+            connection().count(rekordType, condition)
+        } else {
+            connection().countDistinct(rekordType, distinctColumns(rekordType, distinctBy), condition)
+        }
+    }
+
+    /**
+     * The columns the rekords of [rekordType] are told apart by when by [distinctBy]: a field's
+     * own, or, for a field holding a rekord, the ones it refers to that rekord by - its ids.
+     */
+    private fun distinctColumns(rekordType: String, distinctBy: List<String>): List<String> {
+        val schema = rekordSchema(rekordType)
+        return distinctBy.flatMap { field ->
+            when (val type = schema[field]?.type) {
+                is RekordKType -> idFieldNames(type.rekordType()).map { id -> "${field}_$id" }
+                is RekordListKType ->
+                    throw IllegalArgumentException("$field holds a list of rekords, which cannot tell rekords apart")
+                else -> listOf(field)
+            }
+        }
+    }
+
+    /**
+     * The condition selecting, of the rows of [rekordType] [filter] selects, the first of those
+     * holding the same values in [columns]: each that no other row selected and holding them comes
+     * before - in [orderBy], and then in the order the rows were inserted in, by their rowid.
+     *
+     * Written with NOT EXISTS rather than a window function, which SQLite has had only since 3.25 -
+     * Android only since its API 30. A null comes first in an ascending order and last in a
+     * descending one, as SQLite orders it.
+     */
+    private fun firstOfEachCondition(
+        rekordType: String,
+        filter: Filter?,
+        orderBy: List<Order>?,
+        columns: List<String>,
+    ): SQLCondition {
+        // One builder for both, so that the EXISTS each makes reads its tables under names of its own.
+        val builder = conditionBuilder()
+        val selected = filter?.let { builder.build(it, rekordType, alias = rekordType) }
+        val other = DISTINCT_ALIAS
+        val otherSelected = filter?.let { builder.build(it, rekordType, alias = other) }
+        val orders = orderBy.orEmpty()
+        fun same(column: String) = "$other.$column IS $rekordType.$column"
+        val comesBefore = buildList {
+            orders.forEachIndexed { index, order ->
+                val field = order.field
+                val before = when (order) {
+                    is Order.Ascending ->
+                        "(($other.$field IS NULL AND $rekordType.$field IS NOT NULL) OR $other.$field < $rekordType.$field)"
+                    is Order.Descending ->
+                        "(($other.$field IS NOT NULL AND $rekordType.$field IS NULL) OR $other.$field > $rekordType.$field)"
+                }
+                add((orders.take(index).map { same(it.field) } + before).joinToString(" AND ", "(", ")"))
+            }
+            add((orders.map { same(it.field) } + "$other.rowid < $rekordType.rowid").joinToString(" AND ", "(", ")"))
+        }
+        val otherConditions = listOfNotNull(otherSelected?.sql) +
+            columns.map(::same) +
+            comesBefore.joinToString(" OR ", "(", ")")
+        val firstOfEach = "NOT EXISTS (SELECT 1 FROM $rekordType AS $other WHERE ${otherConditions.joinToString(" AND ")})"
+        return SQLCondition(
+            sql = listOfNotNull(selected?.sql, firstOfEach).joinToString(" AND "),
+            args = selected?.args.orEmpty() + otherSelected?.args.orEmpty(),
+        )
+    }
 
     private fun conditionBuilder(): SQLConditionBuilder = SQLConditionBuilder(schemaOf = ::rekordSchema)
 
@@ -324,6 +396,9 @@ class SQLRekordsEditor(
     private fun idColumns(rekordType: String): List<IdColumn> = conditionBuilder().idColumns(rekordType)
 
     private companion object {
+
+        /** The name the rows a row is compared to are read under, see [firstOfEachCondition]. */
+        const val DISTINCT_ALIAS = "_distinct"
 
         /** Fewer variables than the 999 a statement of SQLite before 3.32 takes. */
         const val MAX_VARIABLES = 900

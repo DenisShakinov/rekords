@@ -100,12 +100,17 @@ class RekordsStore(
         orderBy: List<Order>? = null,
         limit: Int? = null,
         offset: Int? = null,
+        distinctBy: List<String>? = null,
     ): Result<List<RekordValues>> = transaction {
-        query<R>(fields, filter, orderBy, limit, offset)
+        query<R>(fields, filter, orderBy, limit, offset, distinctBy)
     }
 
-    suspend inline fun <reified R> count(filter: Filter? = null): Result<Int> = transaction {
-        count<R>(filter)
+    /** See [RekordsEditor.count]. */
+    suspend inline fun <reified R> count(
+        filter: Filter? = null,
+        distinctBy: List<String>? = null,
+    ): Result<Int> = transaction {
+        count<R>(filter, distinctBy)
     }
 
     /**
@@ -159,26 +164,30 @@ class RekordsStore(
         getRekord<R>(filter)
     }
 
+    /** See [RekordsEditor.query] for [distinctBy]. */
     suspend inline fun <reified R> getRekords(
         filter: Filter? = null,
         orderBy: List<Order>? = null,
         limit: Int? = null,
         offset: Int? = null,
+        distinctBy: List<String>? = null,
     ): Result<List<R>> = transaction {
-        getRekords(filter, orderBy, limit, offset)
+        getRekords(filter, orderBy, limit, offset, distinctBy)
     }
 
     /**
-     * The rekords of [R] that [filter] selects, ordered by [orderBy] and paged by [limit] and
-     * [offset], read again each time a transaction writing them commits - see [observe].
+     * The rekords of [R] that [filter] selects, ordered by [orderBy], one for each set of values
+     * of [distinctBy] - see [RekordsEditor.query] - and paged by [limit] and [offset], read again
+     * each time a transaction writing them commits - see [observe].
      */
     inline fun <reified R> observeRekords(
         filter: Filter? = null,
         orderBy: List<Order>? = null,
         limit: Int? = null,
         offset: Int? = null,
+        distinctBy: List<String>? = null,
     ): Flow<List<R>> = observeRekordTypes(listOf(rekordType<R>())) {
-        getRekords<R>(filter, orderBy, limit, offset)
+        getRekords<R>(filter, orderBy, limit, offset, distinctBy)
     }
 
     /** The first rekord of [R] that [filter] selects, or null - see [observe]. */
@@ -187,10 +196,16 @@ class RekordsStore(
             getRekord<R>(filter)
         }
 
-    /** The number of rekords of [R] that [filter] selects - see [observe]. */
-    inline fun <reified R> observeCount(filter: Filter? = null): Flow<Int> =
+    /**
+     * The number of rekords of [R] that [filter] selects, or of the sets of values of [distinctBy]
+     * they hold - see [RekordsEditor.count] and [observe].
+     */
+    inline fun <reified R> observeCount(
+        filter: Filter? = null,
+        distinctBy: List<String>? = null,
+    ): Flow<Int> =
         observeRekordTypes(listOf(rekordType<R>())) {
-            count<R>(filter)
+            count<R>(filter, distinctBy)
         }
 
     /** The [fields] of the rekords of [R] that [filter] selects, as [query] reads them - see [observe]. */
@@ -200,8 +215,9 @@ class RekordsStore(
         orderBy: List<Order>? = null,
         limit: Int? = null,
         offset: Int? = null,
+        distinctBy: List<String>? = null,
     ): Flow<List<RekordValues>> = observeRekordTypes(listOf(rekordType<R>())) {
-        query<R>(fields, filter, orderBy, limit, offset)
+        query<R>(fields, filter, orderBy, limit, offset, distinctBy)
     }
 
     /**
@@ -343,14 +359,15 @@ private class JoinedTransactionEditor(
         orderBy: List<Order>?,
         limit: Int?,
         offset: Int?,
+        distinctBy: List<String>?,
     ): List<RekordValues> {
         val flatFilter = filter?.flattened(rekordType)
-        return runOnEditor(editor) { query(rekordType, fields, flatFilter, orderBy, limit, offset) }
+        return runOnEditor(editor) { query(rekordType, fields, flatFilter, orderBy, limit, offset, distinctBy) }
     }
 
-    override suspend fun count(rekordType: String, filter: Filter?): Int {
+    override suspend fun count(rekordType: String, filter: Filter?, distinctBy: List<String>?): Int {
         val flatFilter = filter?.flattened(rekordType)
-        return runOnEditor(editor) { count(rekordType, flatFilter) }
+        return runOnEditor(editor) { count(rekordType, flatFilter, distinctBy) }
     }
 
     /**

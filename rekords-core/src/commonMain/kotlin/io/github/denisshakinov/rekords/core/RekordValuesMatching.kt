@@ -110,3 +110,36 @@ fun RekordValues.compareTo(other: RekordValues, orderBy: List<Order>): Int {
 private fun comparePrimitive(left: RekordValue?, right: PrimitiveRekordValue?): Int {
     return (left as? RekordValue.Primitive).compareTo(right?.asRekordValue())
 }
+
+/**
+ * The rekords of these, in their order, but one for each set of values of [fields] they hold: the
+ * first of those holding it - see [RekordsEditor.query]. [idPaths] gives the ids of a rekord type,
+ * which a rekord held in a field is told apart by.
+ */
+@InternalRekordsApi
+fun List<RekordValues>.distinctRekords(
+    fields: List<String>,
+    idPaths: (rekordType: String) -> List<List<String>>,
+): List<RekordValues> = distinctBy { values -> values.distinctKey(fields, idPaths) }
+
+/**
+ * What tells these values apart by [fields], as [distinctRekords] does: the value of each field, a
+ * rekord held in one being told by its ids, which [idPaths] gives for its type - or by all it holds,
+ * for a type with none.
+ */
+@InternalRekordsApi
+fun RekordValues.distinctKey(
+    fields: List<String>,
+    idPaths: (rekordType: String) -> List<List<String>>,
+): List<Any?> = fields.map { field ->
+    when (val value = this[field]) {
+        null -> null
+        is RekordValue.Primitive -> value.value
+        is RekordValue.Composite -> idPaths(value.rekordType)
+            .takeIf { paths -> paths.isNotEmpty() }
+            ?.map { path -> value.values.primitiveAt(path) }
+            ?: value.values
+        is RekordValue.CompositeList ->
+            throw IllegalArgumentException("$field holds a list of rekords, which cannot tell rekords apart")
+    }
+}
