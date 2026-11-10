@@ -117,4 +117,27 @@ abstract class RekordsEmbeddedTest(private val rekordsEditor: RekordsEditor) {
 
         assertEquals(expected = listOf(doomOnIgdb, doom), actual = byRelease)
     }
+
+    /** An embedded class tells rekords apart by all its fields together, as a key does. */
+    open fun check_rekords_are_told_apart_by_an_embedded_class() = test {
+        val doomOnIgdbOnPc = TestPlayRekord(doomOnIgdbKey, pc, hours = 40)
+        rekordsStore.putRekord(doomOnIgdbOnPc).getOrThrow()
+
+        assertEquals(
+            expected = 3,
+            actual = rekordsStore.count<TestPlayRekord>(distinctBy = listOf(TestPlayRekord.GAME)).getOrThrow(),
+        )
+        val mostPlayedOfEach = rekordsStore
+            .getRekords<TestPlayRekord>(
+                orderBy = listOf(Order.Descending(TestPlayRekord.HOURS)),
+                distinctBy = listOf(TestPlayRekord.GAME),
+            )
+            .getOrThrow()
+        assertEquals(expected = listOf(doomOnIgdbOnPc, quakeOnPc, doomOnConsole), actual = mostPlayedOfEach)
+        // Its fields named as they are kept tell them apart the same.
+        assertEquals(
+            expected = 2,
+            actual = rekordsStore.count<TestPlayRekord>(distinctBy = listOf("game_id")).getOrThrow(),
+        )
+    }
 }

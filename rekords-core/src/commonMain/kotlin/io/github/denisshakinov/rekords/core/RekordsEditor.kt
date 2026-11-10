@@ -60,8 +60,9 @@ interface RekordsEditor : AutoCloseable {
      * @param distinctBy the fields of which each set of values is read in one rekord alone: the
      * first of the rekords holding it, in the order of [orderBy] - which of those equal in it is
      * the storage's own business. [limit] and [offset] count the rekords so read. A field holding
-     * a rekord tells rekords apart by the ids of that rekord; a field holding a list of rekords, or
-     * one encrypted Randomized, cannot. Null, or none, reads every rekord.
+     * a rekord tells rekords apart by the ids of that rekord, one holding an embedded class by
+     * each field of it; a field holding a list of rekords, or one encrypted Randomized, cannot.
+     * Null, or none, reads every rekord.
      * @return the list of matching rekords as [RekordValues].
      */
     suspend fun query(

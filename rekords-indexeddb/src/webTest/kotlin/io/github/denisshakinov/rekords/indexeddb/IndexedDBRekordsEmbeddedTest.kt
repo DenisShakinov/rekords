@@ -23,6 +23,9 @@ class IndexedDBRekordsEmbeddedTest : RekordsEmbeddedTest(IndexedDBRekordsEditor(
 
     @Test
     override fun check_rekords_are_ordered_by_the_fields_of_an_embedded_class() = super.check_rekords_are_ordered_by_the_fields_of_an_embedded_class()
+
+    @Test
+    override fun check_rekords_are_told_apart_by_an_embedded_class() = super.check_rekords_are_told_apart_by_an_embedded_class()
 }
 
 private var databaseCount = 0

@@ -57,3 +57,32 @@ private fun FieldFilter.withField(name: String): FieldFilter = when (this) {
     is FieldFilter.WordPrefix -> copy(field = name)
     is FieldFilter.Nested -> copy(field = name)
 }
+
+/**
+ * These fields of a rekord of [rekordType] the way a storage keeps them: a field holding an
+ * embedded class is each field of the class, the rekord's own - see [Embedded]. A type [schema]
+ * does not declare, or a field it has not, is left as it is.
+ */
+@OptIn(InternalSerializationApi::class)
+internal fun List<String>.flattenedFields(rekordType: String, schema: RekordsSchema): List<String> {
+    val rekordClass = schema.rekordTypes.firstOrNull { it.rekordType() == rekordType } ?: return this
+    val descriptor: SerialDescriptor = rekordClass.serializer().descriptor
+    return flatMap { field -> descriptor.flattenedField(field, prefix = "") }
+}
+
+/** The fields [field] of [this] is kept as, named under [prefix] - an embedded class's being. */
+@OptIn(ExperimentalSerializationApi::class)
+private fun SerialDescriptor.flattenedField(field: String, prefix: String): List<String> {
+    val index: Int = (0..<elementsCount).firstOrNull { index -> fieldName(index) == field }
+        ?: return listOf(prefix + field)
+    val element: SerialDescriptor = getElementDescriptor(index)
+    if (!element.isEmbedded()) return listOf(prefix + field)
+    val embeddedPrefix: String = prefix + getField(index).embeddedPrefix()
+    return (0..<element.elementsCount)
+        .mapNotNull { elementIndex -> element.fieldName(elementIndex) }
+        .flatMap { elementField -> element.flattenedField(elementField, embeddedPrefix) }
+}
+
+@OptIn(ExperimentalSerializationApi::class)
+private fun SerialDescriptor.fieldName(index: Int): String? =
+    getElementAnnotations(index).filterIsInstance<Field>().firstOrNull()?.name

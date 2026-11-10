@@ -256,8 +256,9 @@ store.delete<NoteRekord>(Filter.LessThan(NoteRekord.CREATED, cutoff))
 
 `distinctBy` reads one rekord for each set of values of the fields it names - the first in the
 order asked for - and counts those sets instead of the rekords; `limit` and `offset` page what is
-read so. A field holding a nested rekord tells rekords apart by the ids of that rekord. A list of
-rekords, or a field encrypted Randomized, tells nothing apart. A null is a value like any other.
+read so. A field holding a nested rekord tells rekords apart by the ids of that rekord, one holding
+an embedded class by all of its fields. A list of rekords, or a field encrypted Randomized, tells
+nothing apart. A null is a value like any other.
 
 Filters are combined with `+` (and) and `or`, or with `Filter.And`, `Filter.Or` and `Filter.Not`.
 `Filter.Nested` filters by a field of a nested rekord, or of any rekord in a list:

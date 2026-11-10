@@ -362,12 +362,21 @@ private class JoinedTransactionEditor(
         distinctBy: List<String>?,
     ): List<RekordValues> {
         val flatFilter = filter?.flattened(rekordType)
-        return runOnEditor(editor) { query(rekordType, fields, flatFilter, orderBy, limit, offset, distinctBy) }
+        val flatDistinctBy = distinctBy?.flattened(rekordType)
+        return runOnEditor(editor) { query(rekordType, fields, flatFilter, orderBy, limit, offset, flatDistinctBy) }
     }
 
     override suspend fun count(rekordType: String, filter: Filter?, distinctBy: List<String>?): Int {
         val flatFilter = filter?.flattened(rekordType)
-        return runOnEditor(editor) { count(rekordType, flatFilter, distinctBy) }
+        val flatDistinctBy = distinctBy?.flattened(rekordType)
+        return runOnEditor(editor) { count(rekordType, flatFilter, flatDistinctBy) }
+    }
+
+    /** See [Embedded]: rekords are told apart by an embedded class as by each of its fields. */
+    private fun List<String>.flattened(rekordType: String): List<String> {
+        val schemaEditor = editor.schemaEditor
+        if (!schemaEditor.hasSchema) return this
+        return flattenedFields(rekordType, schemaEditor.schema)
     }
 
     /**
