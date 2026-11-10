@@ -35,6 +35,7 @@ internal const val META_STORE = "meta"
 
 private const val VERSION_KEY = "version"
 private const val ORDINAL_KEY = "ordinal"
+private const val GENERATED_ID_KEY_PREFIX = "generated_id:"
 
 /**
  * One operation of an [IndexedDBRekordsEditor], run within [transaction].
@@ -139,6 +140,15 @@ internal class RekordsSession(
 
     suspend fun updateVersion(newVersion: Int) {
         with(transaction) { meta.put(jsNumber(newVersion.toDouble()), Key(jsString(VERSION_KEY))) }
+    }
+
+    /** See [io.github.denisshakinov.rekords.core.RekordsSchemaEditor.largestGeneratedId]. */
+    suspend fun largestGeneratedId(rekordType: String): Long =
+        with(transaction) { meta.get(Key(jsString(GENERATED_ID_KEY_PREFIX + rekordType))) }
+            ?.let { toKotlinDouble(it).toLong() } ?: 0L
+
+    suspend fun updateLargestGeneratedId(rekordType: String, largest: Long) {
+        with(transaction) { meta.put(jsNumber(largest.toDouble()), Key(jsString(GENERATED_ID_KEY_PREFIX + rekordType))) }
     }
 
     suspend fun removeRekordType(rekordType: String) = delete(rekordType, filter = null)

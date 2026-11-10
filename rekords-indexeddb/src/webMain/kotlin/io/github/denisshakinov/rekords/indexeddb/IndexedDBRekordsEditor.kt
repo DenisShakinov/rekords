@@ -89,6 +89,12 @@ class IndexedDBRekordsEditor(
 
         override suspend fun updateVersion(newVersion: Int) = connection.session { updateVersion(newVersion) }
 
+        override suspend fun largestGeneratedId(rekordType: String): Long =
+            connection.session { largestGeneratedId(rekordType) }
+
+        override suspend fun updateLargestGeneratedId(rekordType: String, largest: Long) =
+            connection.session { updateLargestGeneratedId(rekordType, largest) }
+
         /** Every rekord type is kept in the same object store, so there is nothing to create. */
         override suspend fun addRekordType(rekordClass: KClass<*>) = Unit
 

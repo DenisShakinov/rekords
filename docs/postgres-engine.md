@@ -27,7 +27,8 @@ emulate core, not the other way round.
 - `SQLConditionBuilder`: nested rekords as correlated `EXISTS` over aliased tables, `IN` lists,
   comparisons, `IS NULL`.
 - Tables per rekord type, junction tables per list, id columns named after the fields holding a
-  rekord, the `_meta` table holding the schema version.
+  rekord, the `_meta` table holding the schema version and the largest number given to the
+  generated ids of each rekord type.
 - `BEGIN` / `COMMIT` / `ROLLBACK` as statements, and nested transactions joined to the outer one.
 - Encryption: it happens in core, and the storage is handed ciphertext as text. A deterministic
   field is still selected by equality.

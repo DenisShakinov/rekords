@@ -43,6 +43,19 @@ annotation class Embedded
  * [Filter.FullText]. Only a field holding text can be, and not an encrypted one: the words would
  * tell what it holds. A storage keeps the words of the field as it is written, so a field already
  * stored is made one by a migration - see [RekordsMigrationEditor.enableFullText].
+ * @property generated whether the id is given to a rekord as it is put, rather than by whoever
+ * puts it. A rekord holding none yet - `0` in an `Int` or `Long` field, `""` in a `String` one -
+ * is given one by [putRekord], which hands back the rekord with it, and so is each rekord it holds
+ * holding none, as deep as they nest. An `Int` or `Long` is given the largest one ever given to a
+ * rekord of its type, or held by one stored, plus one - so the number of a rekord deleted is not
+ * given again, for what still refers to it not to come to refer to another; a `String` a random
+ * UUID. A rekord already holding one is put as any other.
+ *
+ * Only an id can be, and only the one id of its rekord, of none of those types but non-null; not
+ * a field of an embedded class, nor one holding it. An `Int` or `Long` one cannot be encrypted,
+ * since the largest of them could not be told; a `String` one can, [Encryption.Deterministic].
+ * Nothing is kept for it but its values and the largest number given, apart from the rekords, so a
+ * field is made one, or no longer one, with no migration.
  */
 @SerialInfo
 @Target(AnnotationTarget.PROPERTY)
@@ -53,6 +66,7 @@ annotation class Field(
     val encryption: Encryption = Encryption.None,
     val prefixed: Boolean = true,
     val fullText: Boolean = false,
+    val generated: Boolean = false,
 )
 
 /**

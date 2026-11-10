@@ -44,6 +44,22 @@ abstract class RekordsSchemaEditor {
     abstract suspend fun updateVersion(newVersion: Int)
 
     /**
+     * The largest number a [Field.generated] id of [rekordType] has been given, or 0 when none has.
+     *
+     * It is kept apart from the rekords, the way [version] is, so that a rekord deleted does not
+     * give its number back: what still refers to it - a rekord holding it, an item of a list, a
+     * number kept outside the storage - would otherwise come to refer to the next one given it.
+     */
+    abstract suspend fun largestGeneratedId(rekordType: String): Long
+
+    /**
+     * Keeps [largest] as the largest number a generated id of [rekordType] has been given - see
+     * [largestGeneratedId]. It is written within the transaction the numbers are given in, and
+     * taken back with it.
+     */
+    abstract suspend fun updateLargestGeneratedId(rekordType: String, largest: Long)
+
+    /**
      * Registers a new rekord type in the schema based on the given [rekordClass].
      *
      * @param rekordClass the KClass of the rekord to register.

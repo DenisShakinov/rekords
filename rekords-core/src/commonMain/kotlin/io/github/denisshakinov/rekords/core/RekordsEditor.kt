@@ -119,6 +119,19 @@ interface RekordsEditor : AutoCloseable {
     suspend fun <T> transaction(action: suspend RekordsEditor.() -> T): T
 
     /**
+     * See [RekordsSchemaEditor.largestGeneratedId], which it is: a member, so that code running on
+     * the editor - restricted to its operations - can read it.
+     */
+    @InternalRekordsApi
+    suspend fun largestGeneratedId(rekordType: String): Long =
+        schemaEditor.largestGeneratedId(rekordType)
+
+    /** See [RekordsSchemaEditor.updateLargestGeneratedId], and [largestGeneratedId] for why it is here. */
+    @InternalRekordsApi
+    suspend fun updateLargestGeneratedId(rekordType: String, largest: Long) =
+        schemaEditor.updateLargestGeneratedId(rekordType, largest)
+
+    /**
      * Releases whatever the editor holds open - a database connection, say.
      *
      * The editor stays usable afterwards: an implementation that needs a resource acquires it
@@ -166,21 +179,53 @@ suspend inline fun <reified R> RekordsEditor.put(
     filter: Filter? = null,
 ) = put(rekordType<R>(), values, filter)
 
-suspend inline fun <reified R> RekordsEditor.putRekord(rekord: R, filter: Filter? = null) {
-    val values: RekordValues = encode(rekord)
-    return put<R>(
-        values = values,
-        filter = idsFilter(values, allFields<R>()) + filter,
-    )
+/**
+ * Puts [rekord], updating the one stored with the same ids - and the rekords [filter] selects
+ * among them, when given - or adding it when there is none.
+ *
+ * @return [rekord] as it is stored: given the [Field.generated] ids it held none of, its own and
+ * those of the rekords it holds, or [rekord] itself when it held them all.
+ */
+suspend inline fun <reified R> RekordsEditor.putRekord(rekord: R, filter: Filter? = null): R {
+    val counters = GeneratedIdCounters()
+    val stored: R = putRekord(rekord, filter, counters)
+    keepGeneratedIds(counters)
+    return stored
 }
 
+/**
+ * Puts each of [rekords] as [putRekord] does, one after another, and returns them as stored. The
+ * storage is asked for the largest number of each type of generated id once, and told the largest
+ * given once, not for each rekord.
+ */
 suspend inline fun <reified R> RekordsEditor.putRekords(
     rekords: Iterable<R>,
     filter: Filter? = null,
-) {
+): List<R> {
+    val counters = GeneratedIdCounters()
+    val stored = mutableListOf<R>()
     for (rekord: R in rekords) {
-        putRekord<R>(rekord, filter)
+        stored += putRekord<R>(rekord, filter, counters)
     }
+    keepGeneratedIds(counters)
+    return stored
+}
+
+/** See [putRekord]: generated ids are given by [counters], which [putRekords] keeps for them all. */
+@PublishedApi
+internal suspend inline fun <reified R> RekordsEditor.putRekord(
+    rekord: R,
+    filter: Filter?,
+    counters: GeneratedIdCounters,
+): R {
+    val fields: List<FieldWithType> = allFields<R>()
+    val encoded: RekordValues = encode(rekord)
+    val values: RekordValues = generateIds(rekordType<R>(), encoded, fields, counters)
+    put<R>(
+        values = values,
+        filter = idsFilter(values, fields) + filter,
+    )
+    return if (values === encoded) rekord else values.decode()
 }
 
 suspend inline fun <reified R> RekordsEditor.delete(filter: Filter? = null) =

@@ -82,11 +82,23 @@ internal class SchemaMigrationEditor(
     override suspend fun addRekordType(rekordClass: KClass<*>) =
         editor.schemaEditor.addRekordType(rekordClass)
 
-    override suspend fun removeRekordType(rekordType: String) =
+    /** The numbers its generated ids were given go with it: a type added under its name starts anew. */
+    override suspend fun removeRekordType(rekordType: String) {
         editor.schemaEditor.removeRekordType(rekordType)
+        if (editor.schemaEditor.largestGeneratedId(rekordType) != 0L) {
+            editor.schemaEditor.updateLargestGeneratedId(rekordType, 0L)
+        }
+    }
 
-    override suspend fun renameRekordType(oldRekordType: String, newRekordType: String) =
+    /** The numbers its generated ids were given are kept under [newRekordType], for none to be given again. */
+    override suspend fun renameRekordType(oldRekordType: String, newRekordType: String) {
         editor.schemaEditor.renameRekordType(oldRekordType, newRekordType)
+        val largest: Long = editor.schemaEditor.largestGeneratedId(oldRekordType)
+        if (largest != 0L) {
+            editor.schemaEditor.updateLargestGeneratedId(newRekordType, largest)
+            editor.schemaEditor.updateLargestGeneratedId(oldRekordType, 0L)
+        }
+    }
 
     override suspend fun addField(
         rekordType: String,

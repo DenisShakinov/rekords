@@ -60,6 +60,18 @@ class InMemoryRekordsEditor : RekordsEditor {
             version = newVersion
         }
 
+        private val largestGeneratedIds: MutableMap<String, Long> = mutableMapOf()
+
+        override suspend fun largestGeneratedId(rekordType: String): Long =
+            largestGeneratedIds[rekordType] ?: 0L
+
+        override suspend fun updateLargestGeneratedId(rekordType: String, largest: Long) {
+            val oldLargest: Long? = largestGeneratedIds.put(rekordType, largest)
+            journal.record {
+                if (oldLargest == null) largestGeneratedIds.remove(rekordType) else largestGeneratedIds[rekordType] = oldLargest
+            }
+        }
+
         /** A table is created by the first rekord of its type, so there is nothing to make ahead. */
         override suspend fun addRekordType(rekordClass: KClass<*>) {}
 

@@ -77,3 +77,107 @@ private class NestedListIdRekord(
     @Field(name = "inners", id = true)
     val inners: List<InnerRekord>,
 )
+
+class GeneratedIdDeclarationTest {
+
+    @Test
+    fun generated_int_long_and_string_ids_are_accepted() {
+        assertTrue(allFields<GeneratedLongRekord>().single { it.field.id }.field.generated)
+        assertTrue(allFields<GeneratedIntRekord>().single { it.field.id }.field.generated)
+        assertTrue(allFields<GeneratedEncryptedStringRekord>().single { it.field.id }.field.generated)
+    }
+
+    @Test
+    fun generated_field_that_is_not_an_id_is_refused() {
+        assertFailsWith<IllegalArgumentException> { allFields<GeneratedNotIdRekord>() }
+    }
+
+    @Test
+    fun generated_id_of_another_type_is_refused() {
+        assertFailsWith<IllegalArgumentException> { allFields<GeneratedDoubleRekord>() }
+    }
+
+    @Test
+    fun generated_id_that_may_be_none_is_refused() {
+        assertFailsWith<IllegalArgumentException> { allFields<GeneratedNullableRekord>() }
+    }
+
+    @Test
+    fun generated_number_encrypted_is_refused() {
+        assertFailsWith<IllegalArgumentException> { allFields<GeneratedEncryptedLongRekord>() }
+    }
+
+    @Test
+    fun generated_id_among_other_ids_is_refused() {
+        assertFailsWith<IllegalArgumentException> { allFields<GeneratedAmongIdsRekord>() }
+    }
+
+    @Test
+    fun generated_field_of_an_embedded_class_is_refused() {
+        assertFailsWith<IllegalArgumentException> { allFields<GeneratedEmbeddingRekord>() }
+    }
+}
+
+@Rekord(type = "generated_long")
+private class GeneratedLongRekord(
+    @Field(name = "id", id = true, generated = true)
+    val id: Long = 0,
+)
+
+@Rekord(type = "generated_int")
+private class GeneratedIntRekord(
+    @Field(name = "id", id = true, generated = true)
+    val id: Int = 0,
+)
+
+@Rekord(type = "generated_encrypted_string")
+private class GeneratedEncryptedStringRekord(
+    @Field(name = "id", id = true, generated = true, encryption = Encryption.Deterministic)
+    val id: String = "",
+)
+
+@Rekord(type = "generated_not_id")
+private class GeneratedNotIdRekord(
+    @Field(name = "id", id = true)
+    val id: Long,
+    @Field(name = "number", generated = true)
+    val number: Long = 0,
+)
+
+@Rekord(type = "generated_double")
+private class GeneratedDoubleRekord(
+    @Field(name = "id", id = true, generated = true)
+    val id: Double = 0.0,
+)
+
+@Rekord(type = "generated_nullable")
+private class GeneratedNullableRekord(
+    @Field(name = "id", id = true, generated = true)
+    val id: Long? = null,
+)
+
+@Rekord(type = "generated_encrypted_long")
+private class GeneratedEncryptedLongRekord(
+    @Field(name = "id", id = true, generated = true, encryption = Encryption.Deterministic)
+    val id: Long = 0,
+)
+
+@Rekord(type = "generated_among_ids")
+private class GeneratedAmongIdsRekord(
+    @Field(name = "id", id = true, generated = true)
+    val id: Long = 0,
+    @Field(name = "kind", id = true)
+    val kind: String,
+)
+
+@Embedded
+private class GeneratedKey(
+    @Field(name = "id", id = true, generated = true)
+    val id: Long = 0,
+)
+
+@Rekord(type = "generated_embedding")
+private class GeneratedEmbeddingRekord(
+    @Field(name = "key", id = true)
+    val key: GeneratedKey,
+)

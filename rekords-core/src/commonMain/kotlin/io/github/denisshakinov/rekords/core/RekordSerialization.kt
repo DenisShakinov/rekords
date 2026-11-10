@@ -97,6 +97,10 @@ fun SerialDescriptor.allFields(): List<FieldWithType> {
             fields.add(getField(i) to getFieldType(i))
         }
     }
+    require(fields.none { it.field.generated } || fields.count { it.field.id } == 1) {
+        "$serialName has a generated id among other ids, which it cannot: a rekord is told apart " +
+            "by the one generated id alone."
+    }
     return fields
 }
 
@@ -128,6 +132,17 @@ private fun SerialDescriptor.embeddedFields(index: Int): List<FieldWithType> {
     require(!field.fullText) {
         "${field.name} of $serialName holds an embedded class, which has no words of its own: " +
             "make the fields of the class holding text fullText instead."
+    }
+    require(!field.generated) {
+        "${field.name} of $serialName holds an embedded class, which cannot be generated: only " +
+            "an Int, Long or String id can."
+    }
+    val embeddedGenerated: Boolean = (0..<embedded.elementsCount).any { i ->
+        embedded.getElementAnnotations(i).any { it is Field && it.generated }
+    }
+    require(!embeddedGenerated) {
+        "${field.name} of $serialName holds the embedded class ${embedded.serialName}, which has " +
+            "a generated field: an embedded class cannot, only a rekord can."
     }
     val fields: List<FieldWithType> = embedded.allFields()
     require(fields.none { it.type is RekordListKType }) {
@@ -223,6 +238,7 @@ fun SerialDescriptor.getFieldType(index: Int): KType {
         "${field.name} of $serialName is encrypted, so it cannot be fullText: its words would " +
             "tell the storage what it holds."
     }
+    if (field.generated) requireGeneratable(index, field)
     if (field.encryption == Encryption.None) return plainType
     require(plainType !is RekordKType && plainType !is RekordListKType) {
         "${field.name} of $serialName holds a rekord, which cannot be encrypted as a whole: " +
@@ -234,6 +250,30 @@ fun SerialDescriptor.getFieldType(index: Int): KType {
     }
     return EncryptedKType(plainType, field.encryption)
 }
+
+/**
+ * @throws IllegalArgumentException when the [Field.generated] field at [index] is not an id, or
+ * holds something other than a non-null `Int`, `Long` or `String`, or is a number encrypted.
+ */
+private fun SerialDescriptor.requireGeneratable(index: Int, field: Field) {
+    require(field.id) {
+        "${field.name} of $serialName is generated, which only an id can be: mark it id = true."
+    }
+    val elementDescriptor: SerialDescriptor = getElementDescriptor(index)
+    val serialName: String = elementDescriptor.serialName
+    require(!elementDescriptor.isNullable && serialName in GENERATED_SERIAL_NAMES) {
+        "${field.name} of ${this.serialName} holds $serialName, which cannot be generated: only " +
+            "a non-null Int, Long or String can."
+    }
+    require(field.encryption == Encryption.None || serialName == STRING_SERIAL_NAME) {
+        "${field.name} of ${this.serialName} is a generated number, which cannot be encrypted: " +
+            "the largest of them could not be told. Generate a String id to encrypt it."
+    }
+}
+
+private const val STRING_SERIAL_NAME = "kotlin.String"
+
+private val GENERATED_SERIAL_NAMES = setOf("kotlin.Int", "kotlin.Long", STRING_SERIAL_NAME)
 
 private fun SerialDescriptor.getPlainFieldType(index: Int): KType {
     val elementDescriptor: SerialDescriptor = getElementDescriptor(index)

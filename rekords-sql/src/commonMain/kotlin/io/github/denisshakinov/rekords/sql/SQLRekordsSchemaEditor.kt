@@ -46,6 +46,32 @@ class SQLRekordsSchemaEditor(
         )
     }
 
+    override suspend fun largestGeneratedId(rekordType: String): Long {
+        ensureMetaTable()
+        return connection().select(
+            tableName = META_TABLE,
+            columnNames = listOf(VALUE_COLUMN),
+            condition = Filter.Equals(KEY_COLUMN, generatedIdKey(rekordType)).toSQLCondition(META_TABLE),
+            limit = 1,
+        ).firstStringValue()?.toLong() ?: 0L
+    }
+
+    override suspend fun updateLargestGeneratedId(rekordType: String, largest: Long) {
+        ensureMetaTable()
+        val key = generatedIdKey(rekordType)
+        connection().upsert(
+            tableName = META_TABLE,
+            values = mapOf(
+                KEY_COLUMN to key,
+                VALUE_COLUMN to largest.toString(),
+            ),
+            condition = Filter.Equals(KEY_COLUMN, key).toSQLCondition(META_TABLE),
+        )
+    }
+
+    /** The key the largest number given to a generated id of [rekordType] is kept under. */
+    private fun generatedIdKey(rekordType: String): String = "$GENERATED_ID_KEY_PREFIX$rekordType"
+
     override suspend fun addRekordType(rekordClass: KClass<*>) {
         val tableName = rekordClass.rekordType()
         val fields = rekordClass.allFields()
@@ -280,6 +306,7 @@ class SQLRekordsSchemaEditor(
         private const val KEY_COLUMN = "key"
         private const val VALUE_COLUMN = "value"
         private const val VERSION_KEY = "version"
+        private const val GENERATED_ID_KEY_PREFIX = "generated_id:"
         private const val ROW_ID = "_rowid"
     }
 }

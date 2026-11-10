@@ -7,6 +7,7 @@ suspend fun runSamples() {
     transactions()
     observing()
     migration()
+    generatedIds()
     encryption()
     engines()
     caching()

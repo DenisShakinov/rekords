@@ -144,15 +144,17 @@ class RekordsStore(
             Result.failure(e)
         }
 
-    suspend inline fun <reified R> putRekord(rekord: R, filter: Filter? = null): Result<Unit> =
+    /** See [RekordsEditor.putRekord]: the rekord stored, given the ids it is generated. */
+    suspend inline fun <reified R> putRekord(rekord: R, filter: Filter? = null): Result<R> =
         transaction {
             putRekord(rekord, filter)
         }
 
+    /** See [RekordsEditor.putRekords]: the rekords stored, given the ids they are generated. */
     suspend inline fun <reified R> putRekords(
         rekords: Iterable<R>,
         filter: Filter? = null,
-    ): Result<Unit> = transaction {
+    ): Result<List<R>> = transaction {
         putRekords(rekords, filter)
     }
 
